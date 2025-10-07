@@ -1,0 +1,133 @@
+﻿<Window x:Class="PhotoMax.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PhotoMax" Height="720" Width="1120" WindowStartupLocation="CenterScreen">
+    <DockPanel>
+
+        <!-- ===================== MENU BAR ===================== -->
+        <Menu DockPanel.Dock="Top">
+            <!-- File -->
+            <MenuItem Header="_File">
+                <MenuItem Header="_New" Click="File_New_Click"/>
+                <Separator/>
+                <MenuItem Header="_Open..." Click="File_Open_Click"/>
+                <Separator/>
+                <MenuItem Header="_Save" Click="File_Save_Click"/>
+                <MenuItem Header="Save _As..." Click="File_SaveAs_Click"/>
+                <Separator/>
+                <MenuItem Header="_Properties" Click="File_Properties_Click"/>
+                <Separator/>
+                <MenuItem Header="_Quit" Click="File_Quit_Click"/>
+            </MenuItem>
+
+            <!-- Clipboard -->
+            <MenuItem Header="_Clipboard">
+                <MenuItem Header="_Copy" Click="Clipboard_Copy_Click"/>
+                <MenuItem Header="_Paste" Click="Clipboard_Paste_Click"/>
+                <MenuItem Header="Cu_t" Click="Clipboard_Cut_Click"/>
+            </MenuItem>
+
+            <!-- Image -->
+            <MenuItem Header="_Image">
+                <MenuItem Header="Select">
+                    <MenuItem Header="Rectangular" Click="Select_Rect_Click"/>
+                    <MenuItem Header="Free-form (Lasso)" Click="Select_Lasso_Click"/>
+                    <MenuItem Header="Polygon" Click="Select_Polygon_Click"/>
+                </MenuItem>
+                <MenuItem Header="_Crop" Click="Image_Crop_Click"/>
+                <MenuItem Header="_Resize" Click="Image_Resize_Click"/>
+                <MenuItem Header="_Rotate">
+                    <MenuItem Header="Rotate Right 90°" Click="Rotate_Right_Click"/>
+                    <MenuItem Header="Rotate Left 90°" Click="Rotate_Left_Click"/>
+                    <MenuItem Header="Flip _Vertical" Click="Flip_Vert_Click"/>
+                    <MenuItem Header="Flip _Horizontal" Click="Flip_Horiz_Click"/>
+                </MenuItem>
+            </MenuItem>
+
+            <!-- Tools -->
+            <MenuItem Header="_Tools">
+                <MenuItem Header="Zoom">
+                    <MenuItem Header="Zoom _In" Click="Zoom_In_Click"/>
+                    <MenuItem Header="Zoom _Out" Click="Zoom_Out_Click"/>
+                </MenuItem>
+                <MenuItem Header="_Erase (toggle)" Click="Tool_Erase_Click"/>
+                <MenuItem Header="Color _Picker" Click="Tool_ColorPicker_Click"/>
+                <MenuItem Header="_Paint Brushes (enable)" Click="Tool_Brushes_Click"/>
+                <MenuItem Header="_Text Box" Click="Tool_TextBox_Click"/>
+                <MenuItem Header="_Filters">
+                    <MenuItem Header="Gaussian" Click="Filter_Gaussian_Click"/>
+                    <MenuItem Header="Sobel" Click="Filter_Sobel_Click"/>
+                    <MenuItem Header="Binary" Click="Filter_Binary_Click"/>
+                </MenuItem>
+                <MenuItem Header="Histogram Thresholding" Click="Filter_HistogramThreshold_Click"/>
+            </MenuItem>
+
+            <!-- Shapes -->
+            <MenuItem Header="_Shapes">
+                <MenuItem Header="List of Shapes" Click="Shapes_List_Click"/>
+                <MenuItem Header="Outline Color" Click="Shapes_OutlineColor_Click"/>
+                <MenuItem Header="Fill Color" Click="Shapes_FillColor_Click"/>
+            </MenuItem>
+
+            <!-- Colors -->
+            <MenuItem Header="_Colors">
+                <MenuItem Header="Color Palette" Click="Colors_Palette_Click"/>
+                <MenuItem Header="Brush Size (cycle)" Click="Colors_BrushSize_Click"/>
+            </MenuItem>
+
+            <!-- Layers (optional) -->
+            <MenuItem Header="_Layers">
+                <MenuItem Header="New Layer" Click="Layers_New_Click"/>
+                <MenuItem Header="Load Layer" Click="Layers_Load_Click"/>
+                <MenuItem Header="Edit Layer" Click="Layers_Edit_Click"/>
+                <MenuItem Header="Select Layer" Click="Layers_Select_Click"/>
+                <MenuItem Header="Delete Layer" Click="Layers_Delete_Click"/>
+                <MenuItem Header="Rename Layer" Click="Layers_Rename_Click"/>
+            </MenuItem>
+
+            <!-- Fun filters (optional) -->
+            <MenuItem Header="Sna_pchat/Zoom Filters :)" Click="Fun_Filters_Click"/>
+        </Menu>
+
+        <!-- ===================== STATUS BAR ===================== -->
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem Content="Ready" x:Name="StatusText"/>
+        </StatusBar>
+
+        <!-- ===================== WORKSPACE ===================== -->
+        <!-- Centered, scrollable, zoomable artboard that will be resizable later -->
+        <ScrollViewer x:Name="Scroller"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      CanContentScroll="False"
+                      PreviewMouseWheel="Scroller_PreviewMouseWheel">
+            <!-- Center the workspace like Photoshop canvas -->
+            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                <!-- This Grid is what we zoom -->
+                <Grid x:Name="Workspace" RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <ScaleTransform x:Name="WorkspaceScale" ScaleX="1" ScaleY="1"/>
+                    </Grid.RenderTransform>
+
+                    <!-- Artboard defines the logical canvas size (change later to match image) -->
+                    <Canvas x:Name="Artboard" Width="1280" Height="720" Background="#FFF8F8F8">
+                        <!-- Background image layer -->
+                        <Image x:Name="ImageView"
+                               Width="{Binding ElementName=Artboard, Path=Width}"
+                               Height="{Binding ElementName=Artboard, Path=Height}"
+                               Stretch="Fill"
+                               AllowDrop="True"
+                               Drop="ImageView_Drop"/>
+
+                        <!-- Painting overlay (same size as artboard) -->
+                        <InkCanvas x:Name="PaintCanvas"
+                                   Width="{Binding ElementName=Artboard, Path=Width}"
+                                   Height="{Binding ElementName=Artboard, Path=Height}"
+                                   Background="Transparent"/>
+                    </Canvas>
+                </Grid>
+            </Grid>
+        </ScrollViewer>
+
+    </DockPanel>
+</Window>
