@@ -12,4 +12,10 @@
         <PackageReference Include="OpenCvSharp4" Version="4.*" />
         <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.*" />
     </ItemGroup>
+
+    <ItemGroup>
+      <Page Update="GridSettingsWindow.xaml">
+        <Generator>MSBuild:Compile</Generator>
+      </Page>
+    </ItemGroup>
 </Project>

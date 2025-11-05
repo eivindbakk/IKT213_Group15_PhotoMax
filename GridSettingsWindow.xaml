@@ -1,0 +1,52 @@
+﻿<Window x:Class="PhotoMax.GridSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Grid Settings" Height="260" Width="380"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <Grid Margin="16">
+
+        <!-- ROWS: Preview, spacer, controls, spacer, buttons -->
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Preview -->
+        <Border Grid.Row="0" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1" Padding="0">
+            <Grid>
+                <Rectangle Fill="White"/>
+                <Rectangle x:Name="PreviewGrid"/>
+            </Grid>
+        </Border>
+
+        <!-- Controls row -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0" Content="Change Color..." Width="130" Padding="8,4"
+                    Click="ChangeColor_Click"/>
+
+            <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="Opacity:"/>
+
+            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                <Slider x:Name="OpacitySlider" Width="160" Minimum="0" Maximum="100" TickFrequency="10"
+                        IsSnapToTickEnabled="False" ValueChanged="OpacitySlider_ValueChanged"/>
+                <TextBlock x:Name="OpacityLabel" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="OK" Width="80" Margin="0,0,8,0" IsDefault="True" Click="Ok_Click"/>
+            <Button Content="Cancel" Width="80" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

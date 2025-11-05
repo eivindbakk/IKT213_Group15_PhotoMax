@@ -4,9 +4,8 @@
         Title="PhotoMax" Height="720" Width="1120" WindowStartupLocation="CenterScreen">
     <DockPanel>
 
-        <!-- ===================== MENU BAR ===================== -->
+        <!-- MENU -->
         <Menu DockPanel.Dock="Top">
-            <!-- File -->
             <MenuItem Header="_File">
                 <MenuItem Header="_New" Click="File_New_Click"/>
                 <Separator/>
@@ -20,14 +19,12 @@
                 <MenuItem Header="_Quit" Click="File_Quit_Click"/>
             </MenuItem>
 
-            <!-- Clipboard -->
             <MenuItem Header="_Clipboard">
                 <MenuItem Header="_Copy" Click="Clipboard_Copy_Click"/>
                 <MenuItem Header="_Paste" Click="Clipboard_Paste_Click"/>
                 <MenuItem Header="Cu_t" Click="Clipboard_Cut_Click"/>
             </MenuItem>
 
-            <!-- Image -->
             <MenuItem Header="_Image">
                 <MenuItem Header="Select">
                     <MenuItem Header="Rectangular" Click="Select_Rect_Click"/>
@@ -44,11 +41,12 @@
                 </MenuItem>
             </MenuItem>
 
-            <!-- Tools -->
             <MenuItem Header="_Tools">
                 <MenuItem Header="Zoom">
                     <MenuItem Header="Zoom _In" Click="Zoom_In_Click"/>
                     <MenuItem Header="Zoom _Out" Click="Zoom_Out_Click"/>
+                    <MenuItem Header="Zoom _100%" Click="Zoom_100_Click"/>
+                    <MenuItem Header="Zoom to _Fit" Click="Zoom_Fit_Click"/>
                 </MenuItem>
                 <MenuItem Header="_Erase (toggle)" Click="Tool_Erase_Click"/>
                 <MenuItem Header="Color _Picker" Click="Tool_ColorPicker_Click"/>
@@ -62,20 +60,22 @@
                 <MenuItem Header="Histogram Thresholding" Click="Filter_HistogramThreshold_Click"/>
             </MenuItem>
 
-            <!-- Shapes -->
+            <MenuItem Header="_View">
+                <MenuItem Header="Toggle _Grid" Click="View_ToggleGrid_Click"/>
+                <MenuItem Header="Grid _Settings..." Click="View_GridSettings_Click"/>
+            </MenuItem>
+
             <MenuItem Header="_Shapes">
                 <MenuItem Header="List of Shapes" Click="Shapes_List_Click"/>
                 <MenuItem Header="Outline Color" Click="Shapes_OutlineColor_Click"/>
                 <MenuItem Header="Fill Color" Click="Shapes_FillColor_Click"/>
             </MenuItem>
 
-            <!-- Colors -->
             <MenuItem Header="_Colors">
-                <MenuItem Header="Color Palette" Click="Colors_Palette_Click"/>
+                <MenuItem Header="Color Palette" Click="Tool_ColorPicker_Click"/>
                 <MenuItem Header="Brush Size (cycle)" Click="Colors_BrushSize_Click"/>
             </MenuItem>
 
-            <!-- Layers (optional) -->
             <MenuItem Header="_Layers">
                 <MenuItem Header="New Layer" Click="Layers_New_Click"/>
                 <MenuItem Header="Load Layer" Click="Layers_Load_Click"/>
@@ -85,47 +85,79 @@
                 <MenuItem Header="Rename Layer" Click="Layers_Rename_Click"/>
             </MenuItem>
 
-            <!-- Fun filters (optional) -->
             <MenuItem Header="Sna_pchat/Zoom Filters :)" Click="Fun_Filters_Click"/>
         </Menu>
 
-        <!-- ===================== STATUS BAR ===================== -->
+        <!-- STATUS -->
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem Content="Ready" x:Name="StatusText"/>
         </StatusBar>
 
-        <!-- ===================== WORKSPACE ===================== -->
-        <!-- Centered, scrollable, zoomable artboard that will be resizable later -->
+        <!-- WORKSPACE -->
         <ScrollViewer x:Name="Scroller"
+                      Background="#1E1E1E"
                       HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Auto"
                       CanContentScroll="False"
-                      PreviewMouseWheel="Scroller_PreviewMouseWheel">
-            <!-- Center the workspace like Photoshop canvas -->
-            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-                <!-- This Grid is what we zoom -->
-                <Grid x:Name="Workspace" RenderTransformOrigin="0.5,0.5">
-                    <Grid.RenderTransform>
-                        <ScaleTransform x:Name="WorkspaceScale" ScaleX="1" ScaleY="1"/>
-                    </Grid.RenderTransform>
+                      ClipToBounds="True"
+                      PreviewMouseWheel="Scroller_PreviewMouseWheel"
+                      PreviewMouseDown="Scroller_PreviewMouseDown"
+                      PreviewMouseMove="Scroller_PreviewMouseMove"
+                      PreviewMouseUp="Scroller_PreviewMouseUp"
+                      PreviewKeyDown="Scroller_PreviewKeyDown"
+                      PreviewKeyUp="Scroller_PreviewKeyUp">
 
-                    <!-- Artboard defines the logical canvas size (change later to match image) -->
-                    <Canvas x:Name="Artboard" Width="1280" Height="720" Background="#FFF8F8F8">
-                        <!-- Background image layer -->
-                        <Image x:Name="ImageView"
-                               Width="{Binding ElementName=Artboard, Path=Width}"
-                               Height="{Binding ElementName=Artboard, Path=Height}"
-                               Stretch="Fill"
-                               AllowDrop="True"
-                               Drop="ImageView_Drop"/>
+            <Grid x:Name="Root"
+                  MinWidth="{Binding ElementName=Scroller, Path=ActualWidth}"
+                  MinHeight="{Binding ElementName=Scroller, Path=ActualHeight}">
 
-                        <!-- Painting overlay (same size as artboard) -->
-                        <InkCanvas x:Name="PaintCanvas"
-                                   Width="{Binding ElementName=Artboard, Path=Width}"
-                                   Height="{Binding ElementName=Artboard, Path=Height}"
-                                   Background="Transparent"/>
-                    </Canvas>
-                </Grid>
+                <Border x:Name="Workbench" Background="#1E1E1E" Padding="0">
+
+                    <Grid x:Name="Workspace"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          RenderTransformOrigin="0.5,0.5">
+
+                        <!-- ≤100% -->
+                        <Grid.RenderTransform>
+                            <ScaleTransform x:Name="RenderScale" ScaleX="1" ScaleY="1"/>
+                        </Grid.RenderTransform>
+                        <!-- >100% -->
+                        <Grid.LayoutTransform>
+                            <ScaleTransform x:Name="LayoutScale" ScaleX="1" ScaleY="1"/>
+                        </Grid.LayoutTransform>
+
+                        <!-- Canvas with border + shadow -->
+                        <Border Background="#FFFDFDFD" BorderBrush="#404040" BorderThickness="1">
+                            <Border.Effect>
+                                <DropShadowEffect ShadowDepth="4" BlurRadius="8" Opacity="0.25"/>
+                            </Border.Effect>
+
+                            <Grid x:Name="ArtboardHost">
+                                <Canvas x:Name="Artboard" Background="White" Width="1280" Height="720">
+                                    <Image x:Name="ImageView"
+                                           Width="{Binding ElementName=Artboard, Path=Width}"
+                                           Height="{Binding ElementName=Artboard, Path=Height}"
+                                           Stretch="Fill"
+                                           AllowDrop="True"
+                                           Drop="ImageView_Drop"/>
+                                    <InkCanvas x:Name="PaintCanvas"
+                                               Width="{Binding ElementName=Artboard, Path=Width}"
+                                               Height="{Binding ElementName=Artboard, Path=Height}"
+                                               Background="Transparent"/>
+                                </Canvas>
+
+                                <!-- Grid overlay -->
+                                <Rectangle x:Name="GridOverlay"
+                                           Width="{Binding ElementName=Artboard, Path=Width}"
+                                           Height="{Binding ElementName=Artboard, Path=Height}"
+                                           IsHitTestVisible="False"
+                                           Opacity="0.8"
+                                           Visibility="Visible"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
             </Grid>
         </ScrollViewer>
 
