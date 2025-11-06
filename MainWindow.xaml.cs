@@ -5,8 +5,6 @@ using System.Windows.Ink;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
-using Microsoft.Win32;
-using WF = System.Windows.Forms;
 
 namespace PhotoMax
 {
@@ -85,21 +83,6 @@ namespace PhotoMax
             GridOverlay.Visibility = _gridEnabled ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private void View_ToggleGrid_Click(object sender, RoutedEventArgs e)
-        {
-            _gridEnabled = !_gridEnabled;
-            GridOverlay.Visibility = _gridEnabled ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        private void View_GridSettings_Click(object sender, RoutedEventArgs e)
-        {
-            var dlg = new GridSettingsWindow(_gridColor) { Owner = this };
-            if (dlg.ShowDialog() == true)
-            {
-                _gridColor = dlg.GridColor; // includes new alpha
-                UpdateGridBrush();
-            }
-        }
 
         /* -------------------- ZOOM CORE -------------------- */
         private static bool AtOrBelowOne(double z) => z <= 1.0 + 1e-9;
@@ -213,35 +196,6 @@ namespace PhotoMax
         }
 
         /* -------------------- ZOOM BUTTONS -------------------- */
-        private void Zoom_In_Click(object sender, RoutedEventArgs e)
-        {
-            double next = _zoom * ZoomStep;
-            if (AtOrBelowOne(next))
-            {
-                ApplyZoom_NoScroll(next);
-            }
-            else
-            {
-                var m = new Point(Scroller.ViewportWidth / 2.0, Scroller.ViewportHeight / 2.0);
-                var p = ViewportPointToWorkspaceBeforeZoom(m);
-                SetZoomToCursor(next, m, p);
-            }
-        }
-
-        private void Zoom_Out_Click(object sender, RoutedEventArgs e)
-        {
-            double next = _zoom / ZoomStep;
-            if (AtOrBelowOne(next))
-            {
-                ApplyZoom_NoScroll(next);
-            }
-            else
-            {
-                var m = new Point(Scroller.ViewportWidth / 2.0, Scroller.ViewportHeight / 2.0);
-                var p = ViewportPointToWorkspaceBeforeZoom(m);
-                SetZoomToCursor(next, m, p);
-            }
-        }
 
         private Point ViewportPointToWorkspaceBeforeZoom(Point viewportPoint)
         {
@@ -251,20 +205,6 @@ namespace PhotoMax
             return toWorkspace.Transform(inContent);
         }
 
-        private void Zoom_100_Click(object? sender, RoutedEventArgs e) => SetZoomCentered(1.0);
-
-        private void Zoom_Fit_Click(object? sender, RoutedEventArgs e)
-        {
-            var margin = 16.0;
-            var vw = Math.Max(1, Scroller.ViewportWidth  - margin);
-            var vh = Math.Max(1, Scroller.ViewportHeight - margin);
-
-            var cw = Math.Max(1, Artboard.ActualWidth);
-            var ch = Math.Max(1, Artboard.ActualHeight);
-
-            var fit = Math.Max(MinZoom, Math.Min(vw / cw, vh / ch));
-            SetZoomCentered(fit);
-        }
 
         /* -------------------- PANNING -------------------- */
         private void Scroller_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -344,84 +284,7 @@ namespace PhotoMax
                 : $"Brush • Color: #{_brushColor.R:X2}{_brushColor.G:X2}{_brushColor.B:X2} • Size: {_brushSizes[_brushIndex]} px";
         }
 
-        private void Tool_Brushes_Click(object sender, RoutedEventArgs e)
-        {
-            _eraseMode = false;
-            PaintCanvas.EditingMode = InkCanvasEditingMode.Ink;
-            ConfigureBrush();
-        }
-
-        private void Tool_Erase_Click(object sender, RoutedEventArgs e)
-        {
-            _eraseMode = !_eraseMode;
-            PaintCanvas.EditingMode = _eraseMode ? InkCanvasEditingMode.EraseByPoint : InkCanvasEditingMode.Ink;
-            ConfigureBrush();
-        }
-
-        private void Colors_BrushSize_Click(object sender, RoutedEventArgs e)
-        {
-            _brushIndex = (_brushIndex + 1) % _brushSizes.Length;
-            ConfigureBrush();
-        }
-
-        private void Tool_ColorPicker_Click(object sender, RoutedEventArgs e)
-        {
-            using var dlg = new WF.ColorDialog { AllowFullOpen = true, FullOpen = true };
-            if (dlg.ShowDialog() == WF.DialogResult.OK)
-            {
-                _brushColor = Color.FromRgb(dlg.Color.R, dlg.Color.G, dlg.Color.B);
-                _eraseMode = false;
-                ConfigureBrush();
-            }
-        }
-
-        private void Tool_TextBox_Click(object sender, RoutedEventArgs e)
-        {
-            MessageBox.Show("TODO: Text box tool.");
-        }
-
-        /* -------------------- PLACEHOLDERS -------------------- */
-        private void File_New_Click(object sender, RoutedEventArgs e) =>
-            MessageBox.Show("TODO: New document (create empty Mat + set artboard).");
-        private void File_Open_Click(object sender, RoutedEventArgs e)
-        {
-            var dlg = new OpenFileDialog
-            {
-                Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff|All files|*.*"
-            };
-            if (dlg.ShowDialog() == true)
-                MessageBox.Show($"TODO: Open image: {dlg.FileName} then SetArtboardSize(imageW, imageH)");
-        }
-        private void File_Save_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Save merged Image + Strokes.");
-        private void File_SaveAs_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Save As...");
-        private void File_Properties_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Show image properties.");
-        private void File_Quit_Click(object sender, RoutedEventArgs e) => Close();
-        private void Clipboard_Copy_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Copy selection.");
-        private void Clipboard_Paste_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Paste.");
-        private void Clipboard_Cut_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Cut.");
-        private void Select_Rect_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Rectangular selection.");
-        private void Select_Lasso_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Lasso selection.");
-        private void Select_Polygon_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Polygon selection.");
-        private void Image_Crop_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Crop.");
-        private void Image_Resize_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Resize.");
-        private void Rotate_Right_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Rotate Right 90°.");
-        private void Rotate_Left_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Rotate Left 90°.");
-        private void Flip_Vert_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Flip Vertical.");
-        private void Flip_Horiz_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Flip Horizontal.");
-        private void Filter_Gaussian_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Gaussian (OpenCvSharp).");
-        private void Filter_Sobel_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Sobel (OpenCvSharp).");
-        private void Filter_Binary_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Binary threshold.");
-        private void Filter_HistogramThreshold_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Histogram threshold.");
-        private void Shapes_List_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Shapes list.");
-        private void Shapes_OutlineColor_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Outline color.");
-        private void Shapes_FillColor_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Fill color.");
-        private void Layers_New_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: New layer.");
-        private void Layers_Load_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Load layer.");
-        private void Layers_Edit_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Edit layer.");
-        private void Layers_Select_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Select layer.");
-        private void Layers_Delete_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Delete layer.");
-        private void Layers_Rename_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Rename layer.");
-        private void Fun_Filters_Click(object sender, RoutedEventArgs e) => MessageBox.Show("TODO: Fun filters 😉");
+        /* -------------------- DRAG AND DROP -------------------- */
         private void ImageView_Drop(object sender, DragEventArgs e) => MessageBox.Show("TODO: Drag-and-drop open.");
     }
 }
