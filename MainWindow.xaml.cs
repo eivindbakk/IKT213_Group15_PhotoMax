@@ -31,6 +31,10 @@ namespace PhotoMax
         private Color _gridColor = Color.FromArgb(0x22, 0x00, 0x00, 0x00); // default alpha ≈ 13%
         private double _gridSpacing = 32.0;
 
+        // Current file
+        private string? _currentFilePath = null;
+        private bool _hasUnsavedChanges = false;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -47,6 +51,10 @@ namespace PhotoMax
             {
                 if (_zoom <= 1.0 + 1e-9) SetZoomCentered(_zoom);
             };
+
+            // Track changes when drawing/editing
+            PaintCanvas.StrokeCollected += (_, __) => _hasUnsavedChanges = true;
+            PaintCanvas.StrokeErased += (_, __) => _hasUnsavedChanges = true;
         }
 
         /* -------------------- GRID -------------------- */
