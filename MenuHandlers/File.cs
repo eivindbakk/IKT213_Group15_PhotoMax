@@ -223,7 +223,7 @@ namespace PhotoMax
                 StringBuilder props = new StringBuilder();
                 
                 // Get image dimensions from ImageView
-                BitmapSource bitmapSource = ImageView.Source as BitmapSource;
+                BitmapSource? bitmapSource = ImageView.Source as BitmapSource;
                 if (bitmapSource != null)
                 {
                     props.AppendLine($"Dimensions: {bitmapSource.PixelWidth} x {bitmapSource.PixelHeight} pixels");
