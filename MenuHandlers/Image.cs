@@ -26,7 +26,6 @@ namespace PhotoMax
     /// <summary>
     /// OpenCvSharp-backed image (BGRA 8-bit for WPF interop).
     /// </summary>
-    
     public partial class MainWindow
     {
         // ---- Image menu handlers (thin forwarders to ImageController) ----
@@ -58,7 +57,7 @@ namespace PhotoMax
         private void Flip_Horiz_Click(object sender, RoutedEventArgs e)
             => _img?.FlipHorizontal();
     }
-    
+
     public sealed class ImageDoc : IDisposable
     {
         public Mat Image { get; private set; }          // CV_8UC4 (BGRA)
@@ -225,14 +224,23 @@ namespace PhotoMax
             N, S, E, W,
             NE, NW, SE, SW
         }
-        
+
+        // ---- floating paste (drag after paste, click elsewhere to place) ----
+        private Mat? _floatingMat;                            // BGRA content being moved
+        private System.Windows.Controls.Image? _floatingView; // visual for the floating content
+        private Rectangle? _floatingOutline;                  // subtle outline while hover/drag
+        private WPoint _floatPos;                             // top-left of floating content
+        private bool _floatDragging;
+        private bool _floatHovering;
+        private Vector _floatGrabDelta;                       // mouse offset at drag start
+        private bool _floatingActive;
+
         // still inside: namespace PhotoMax { public sealed class ImageController { ... } }
         public void ForceRefreshView()
         {
             // Reuse internal plumbing. RefreshView() already ends with: ImageChanged?.Invoke();
             RefreshView();
         }
-
 
         public ImageController(System.Windows.Controls.Image imageView, Canvas artboard, ContentControl status, InkCanvas paintCanvas)
         {
@@ -243,6 +251,9 @@ namespace PhotoMax
 
             HookSelectionEvents();
             HookCropKeys();
+            HookFloatingPasteEvents();
+            HookFloatingKeys();
+            HookClipboardKeys();   // Ctrl+C / X / V
             RefreshView();
         }
 
@@ -534,7 +545,7 @@ namespace PhotoMax
             _mode = SelMode.None;
             _status.Content = "Ready";
 
-            // Re-enable painting
+            // Re-enable painting (unless floating paste is active; that disables it again)
             _paint.IsHitTestVisible = true;
             _paint.Cursor = Cursors.Pen;
         }
@@ -603,6 +614,362 @@ namespace PhotoMax
 
             // 5) Clear vector strokes after baking
             _paint.Strokes.Clear();
+        }
+
+        /* ---------------- clipboard (copy / cut / paste) — improved ---------------- */
+
+        public void CopySelectionToClipboard()
+        {
+            BakeStrokesToImage();
+
+            var r = _activeSelectionRect ?? new WRect(0, 0, Doc.Width, Doc.Height);
+            r = NormalizeRect(r);
+            r = WRect.Intersect(r, new WRect(0, 0, Doc.Width, Doc.Height));
+            if (r.IsEmpty || r.Width < 1 || r.Height < 1) { MessageBox.Show("Nothing to copy."); return; }
+
+            int x = (int)Math.Floor(r.X);
+            int y = (int)Math.Floor(r.Y);
+            int w = (int)Math.Round(r.Width);
+            int h = (int)Math.Round(r.Height);
+
+            using var roi = new Mat(Doc.Image, new OcvRect(x, y, w, h));
+            using var clone = roi.Clone();
+            var bmp = MatToBitmapSourceBGRA(clone);
+            var pbgra = new FormatConvertedBitmap(bmp, PixelFormats.Pbgra32, null, 0);
+            pbgra.Freeze();
+            Clipboard.SetImage(pbgra);
+
+            _status.Content = $"Copied {w}×{h}";
+        }
+
+        public void CutSelectionToClipboard()
+        {
+            BakeStrokesToImage();
+
+            var r = _activeSelectionRect ?? new WRect(0, 0, Doc.Width, Doc.Height);
+            r = NormalizeRect(r);
+            r = WRect.Intersect(r, new WRect(0, 0, Doc.Width, Doc.Height));
+            if (r.IsEmpty || r.Width < 1 || r.Height < 1) { MessageBox.Show("Nothing to cut."); return; }
+
+            int x = (int)Math.Floor(r.X);
+            int y = (int)Math.Floor(r.Y);
+            int w = (int)Math.Round(r.Width);
+            int h = (int)Math.Round(r.Height);
+
+            // Copy to clipboard first
+            using (var roi = new Mat(Doc.Image, new OcvRect(x, y, w, h)))
+            using (var clone = roi.Clone())
+            {
+                var bmp = MatToBitmapSourceBGRA(clone);
+                var pbgra = new FormatConvertedBitmap(bmp, PixelFormats.Pbgra32, null, 0);
+                pbgra.Freeze();
+                Clipboard.SetImage(pbgra);
+            }
+
+            // Clear selection area to white (opaque). Keep selection visible for predictability.
+            Cv2.Rectangle(Doc.Image, new OcvRect(x, y, w, h), new Scalar(255, 255, 255, 255), -1);
+            RefreshView();
+            _status.Content = $"Cut {w}×{h}";
+        }
+
+        public void PasteFromClipboard()
+        {
+            BakeStrokesToImage();
+
+            if (!Clipboard.ContainsImage()) { MessageBox.Show("Clipboard does not contain an image."); return; }
+            var cb = Clipboard.GetImage();
+            if (cb == null) { MessageBox.Show("Failed to read image from clipboard."); return; }
+
+            using var src = BitmapSourceToMatBGRA(cb);
+
+            // Initial placement: selection top-left if present, otherwise center
+            int px, py;
+            if (_activeSelectionRect is WRect sel && !sel.IsEmpty)
+            {
+                px = (int)Math.Floor(sel.X);
+                py = (int)Math.Floor(sel.Y);
+            }
+            else
+            {
+                px = Math.Max(0, (Doc.Width  - src.Width)  / 2);
+                py = Math.Max(0, (Doc.Height - src.Height) / 2);
+            }
+
+            BeginFloatingPaste(src, px, py);
+            _status.Content = "Paste: drag to move; click outside to place (Enter=place, Esc=cancel).";
+        }
+
+        /* ---------------- floating paste implementation ---------------- */
+
+        private void BeginFloatingPaste(Mat sourceBGRA, int x, int y)
+        {
+            // If a previous floating paste exists, place it first for predictability
+            if (_floatingActive) CommitFloatingPaste();
+
+            _floatingMat = sourceBGRA.Clone(); // keep our own copy
+            _floatPos = new WPoint(x, y);
+            ClampFloatingToBounds();
+
+            // Clear selection visuals so the user sees the pasted thing clearly
+            EndSelectionMode();
+
+            // Make a WPF Image that shows the floating content on top
+            var bmp = MatToBitmapSourceBGRA(_floatingMat);
+            _floatingView = new System.Windows.Controls.Image
+            {
+                Source = bmp,
+                Width = _floatingMat.Width,
+                Height = _floatingMat.Height,
+                IsHitTestVisible = false
+            };
+            RenderOptions.SetBitmapScalingMode(_floatingView, BitmapScalingMode.NearestNeighbor);
+            Panel.SetZIndex(_floatingView, 2000);
+            _artboard.Children.Add(_floatingView);
+
+            // Create the subtle outline (dashed, crisp)
+            _floatingOutline = new Rectangle
+            {
+                Width = _floatingMat.Width,
+                Height = _floatingMat.Height,
+                Stroke = Brushes.DodgerBlue,
+                StrokeThickness = 1.0,
+                StrokeDashArray = new DoubleCollection { 3, 2 },
+                Fill = Brushes.Transparent,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed
+            };
+            RenderOptions.SetEdgeMode(_floatingOutline, EdgeMode.Aliased);
+            Panel.SetZIndex(_floatingOutline, 2001);
+            _artboard.Children.Add(_floatingOutline);
+
+            UpdateFloatingView();
+            UpdateFloatingOutlineVisibility(forceVisible: false);
+
+            // Disable painting so dragging is smooth and Artboard gets the mouse
+            _paint.EditingMode = InkCanvasEditingMode.None;
+            _paint.IsHitTestVisible = false;
+            _paint.Cursor = Cursors.Arrow;
+
+            _floatingActive = true;
+            _artboard.Focusable = true;
+            _artboard.Focus();
+        }
+
+        private void CommitFloatingPaste()
+        {
+            if (!_floatingActive || _floatingMat is null) return;
+            AlphaBlendOver(_floatingMat, (int)Math.Round(_floatPos.X), (int)Math.Round(_floatPos.Y));
+            RemoveFloatingView();
+            RefreshView();
+            _status.Content = "Pasted.";
+        }
+
+        private void CancelFloatingPaste()
+        {
+            if (!_floatingActive) return;
+            RemoveFloatingView();
+            RefreshView();
+            _status.Content = "Paste cancelled.";
+        }
+
+        private void RemoveFloatingView()
+        {
+            if (_floatingView != null) _artboard.Children.Remove(_floatingView);
+            if (_floatingOutline != null) _artboard.Children.Remove(_floatingOutline);
+
+            _floatingView = null;
+            _floatingOutline = null;
+
+            _floatingMat?.Dispose();
+            _floatingMat = null;
+            _floatingActive = false;
+            _floatDragging = false;
+            _floatHovering = false;
+
+            // Re-enable painting
+            _paint.IsHitTestVisible = true;
+            _paint.Cursor = Cursors.Pen;
+        }
+
+        private void UpdateFloatingView()
+        {
+            if (_floatingView == null) return;
+            Canvas.SetLeft(_floatingView, _floatPos.X);
+            Canvas.SetTop(_floatingView,  _floatPos.Y);
+
+            if (_floatingOutline != null)
+            {
+                _floatingOutline.Width = _floatingView.Width;
+                _floatingOutline.Height = _floatingView.Height;
+                Canvas.SetLeft(_floatingOutline, _floatPos.X);
+                Canvas.SetTop(_floatingOutline,  _floatPos.Y);
+            }
+        }
+
+        private void ClampFloatingToBounds()
+        {
+            if (_floatingMat is null) return;
+            double maxX = Math.Max(0, Doc.Width  - _floatingMat.Width);
+            double maxY = Math.Max(0, Doc.Height - _floatingMat.Height);
+            _floatPos = new WPoint(Math.Clamp(_floatPos.X, 0, maxX), Math.Clamp(_floatPos.Y, 0, maxY));
+        }
+
+        private bool HitTestFloating(WPoint p)
+        {
+            if (!_floatingActive || _floatingMat is null) return false;
+            var r = new WRect(_floatPos.X, _floatPos.Y, _floatingMat.Width, _floatingMat.Height);
+            return r.Contains(p);
+        }
+
+        private void UpdateFloatingCursor(WPoint p)
+        {
+            bool hit = HitTestFloating(p);
+            _floatHovering = hit;
+            _artboard.Cursor = hit ? Cursors.SizeAll : Cursors.Arrow;
+            UpdateFloatingOutlineVisibility(forceVisible: _floatDragging || _floatHovering);
+        }
+
+        private void UpdateFloatingOutlineVisibility(bool forceVisible)
+        {
+            if (_floatingOutline == null) return;
+            _floatingOutline.Visibility = (forceVisible && _floatingActive) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        /* ---------------- floating paste event hooks ---------------- */
+
+        private void HookFloatingPasteEvents()
+        {
+            // Use Preview* so we can swallow events while floating
+            _artboard.PreviewMouseLeftButtonDown += (s, e) =>
+            {
+                if (!_floatingActive) return;
+                var pos = e.GetPosition(_artboard);
+
+                if (HitTestFloating(pos))
+                {
+                    _floatDragging = true;
+                    _floatGrabDelta = (Vector)(pos - _floatPos);
+                    _artboard.CaptureMouse();
+                    UpdateFloatingOutlineVisibility(forceVisible: true);
+                    e.Handled = true;
+                }
+                else
+                {
+                    // Click outside: place it
+                    CommitFloatingPaste();
+                    e.Handled = true;
+                }
+            };
+
+            _artboard.PreviewMouseMove += (s, e) =>
+            {
+                if (!_floatingActive) return;
+                var pos = e.GetPosition(_artboard);
+
+                if (_floatDragging)
+                {
+                    _floatPos = pos - _floatGrabDelta;
+                    ClampFloatingToBounds();
+                    UpdateFloatingView();
+                    UpdateFloatingOutlineVisibility(forceVisible: true);
+                    e.Handled = true;
+                }
+                else
+                {
+                    UpdateFloatingCursor(pos); // also toggles outline on hover
+                }
+            };
+
+            _artboard.PreviewMouseLeftButtonUp += (s, e) =>
+            {
+                if (!_floatingActive) return;
+                if (_floatDragging)
+                {
+                    _floatDragging = false;
+                    _artboard.ReleaseMouseCapture();
+                    // After releasing, only show outline if still hovering
+                    UpdateFloatingOutlineVisibility(forceVisible: _floatHovering);
+                    e.Handled = true;
+                }
+            };
+
+            _artboard.MouseLeave += (s, e) =>
+            {
+                if (!_floatingActive) return;
+                _floatHovering = false;
+                if (!_floatDragging) UpdateFloatingOutlineVisibility(forceVisible: false);
+            };
+        }
+
+        private void HookFloatingKeys()
+        {
+            _artboard.PreviewKeyDown += (s, e) =>
+            {
+                if (!_floatingActive) return;
+
+                if (e.Key == Key.Enter)
+                {
+                    CommitFloatingPaste();
+                    e.Handled = true;
+                }
+                else if (e.Key == Key.Escape)
+                {
+                    CancelFloatingPaste();
+                    e.Handled = true;
+                }
+                else if (e.Key == Key.Left || e.Key == Key.Right || e.Key == Key.Up || e.Key == Key.Down)
+                {
+                    // Arrow-key nudge for fine placement
+                    int dx = (e.Key == Key.Left)  ? -1 : (e.Key == Key.Right) ? 1 : 0;
+                    int dy = (e.Key == Key.Up)    ? -1 : (e.Key == Key.Down)  ? 1 : 0;
+                    _floatPos = new WPoint(_floatPos.X + dx, _floatPos.Y + dy);
+                    ClampFloatingToBounds();
+                    UpdateFloatingView();
+                    UpdateFloatingOutlineVisibility(forceVisible: true);
+                    e.Handled = true;
+                }
+            };
+        }
+
+        private void HookClipboardKeys()
+        {
+            KeyEventHandler handler = (s, e) =>
+            {
+                if (e.Handled) return;
+
+                bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+                if (!ctrl) return;
+
+                switch (e.Key)
+                {
+                    case Key.C:
+                        if (_floatingActive) return;         // avoid copying while floating
+                        CopySelectionToClipboard();
+                        e.Handled = true;
+                        break;
+
+                    case Key.X:
+                        if (_floatingActive) return;         // avoid cutting while floating
+                        CutSelectionToClipboard();
+                        e.Handled = true;
+                        break;
+
+                    case Key.V:
+                        if (_floatingActive) CommitFloatingPaste(); // predictable behavior
+                        PasteFromClipboard();
+                        e.Handled = true;
+                        break;
+                }
+            };
+
+            // Catch keys regardless of which control currently has focus
+            _artboard.PreviewKeyDown += handler;
+            _paint.PreviewKeyDown += handler;
+            _imageView.PreviewKeyDown += handler;
+
+            // Belt & suspenders: listen on the window too (use alias to avoid OpenCvSharp.Window clash)
+            if (Application.Current?.MainWindow is WWindow win)
+                win.PreviewKeyDown += handler;
         }
 
         /* ---------------- interactive crop ---------------- */
@@ -1007,6 +1374,86 @@ namespace PhotoMax
                     e.Handled = true;
                 }
             };
+        }
+
+        /* ---------------- low-level helpers ---------------- */
+
+        private static BitmapSource MatToBitmapSourceBGRA(Mat m)
+        {
+            if (m.Empty()) throw new InvalidOperationException("Mat is empty.");
+            Mat bgra = m;
+            if (m.Type() != MatType.CV_8UC4)
+            {
+                bgra = new Mat();
+                Cv2.CvtColor(m, bgra, ColorConversionCodes.BGR2BGRA);
+            }
+
+            int w = bgra.Width, h = bgra.Height, stride = w * 4;
+            var bmp = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, bgra.Data, stride * h, stride);
+            bmp.Freeze();
+            if (!ReferenceEquals(bgra, m)) bgra.Dispose();
+            return bmp;
+        }
+
+        private static Mat BitmapSourceToMatBGRA(BitmapSource bmp)
+        {
+            var fmt = bmp.Format == PixelFormats.Bgra32 ? bmp : new FormatConvertedBitmap(bmp, PixelFormats.Bgra32, null, 0);
+            int w = fmt.PixelWidth, h = fmt.PixelHeight, stride = w * 4;
+            var data = new byte[stride * h];
+            fmt.CopyPixels(data, stride, 0);
+            var mat = new Mat(h, w, MatType.CV_8UC4);
+            Marshal.Copy(data, 0, mat.Data, data.Length);
+            return mat;
+        }
+
+        private void AlphaBlendOver(Mat src, int x, int y)
+        {
+            if (src.Empty()) return;
+
+            int dstW = Doc.Width, dstH = Doc.Height;
+
+            int sx = 0, sy = 0, dx = x, dy = y;
+            if (dx < 0) { sx = -dx; dx = 0; }
+            if (dy < 0) { sy = -dy; dy = 0; }
+
+            int maxW = Math.Min(src.Width  - sx, dstW - dx);
+            int maxH = Math.Min(src.Height - sy, dstH - dy);
+            if (maxW <= 0 || maxH <= 0) return;
+
+            int srcStep = (int)src.Step();
+            int dstStep = (int)Doc.Image.Step();
+            var dstData = new byte[dstStep * dstH];
+            Marshal.Copy(Doc.Image.Data, dstData, 0, dstData.Length);
+
+            var srcData = new byte[srcStep * src.Height];
+            Marshal.Copy(src.Data, srcData, 0, srcData.Length);
+
+            for (int row = 0; row < maxH; row++)
+            {
+                int sRow = (sy + row) * srcStep;
+                int dRow = (dy + row) * dstStep;
+
+                for (int col = 0; col < maxW; col++)
+                {
+                    int si = sRow + (sx + col) * 4;
+                    int di = dRow + (dx + col) * 4;
+
+                    byte sb = srcData[si + 0];
+                    byte sg = srcData[si + 1];
+                    byte sr = srcData[si + 2];
+                    byte sa = srcData[si + 3];
+
+                    if (sa == 0) continue;
+
+                    double a = sa / 255.0;
+                    dstData[di + 0] = (byte)Math.Clamp(sb * a + dstData[di + 0] * (1.0 - a), 0, 255); // B
+                    dstData[di + 1] = (byte)Math.Clamp(sg * a + dstData[di + 1] * (1.0 - a), 0, 255); // G
+                    dstData[di + 2] = (byte)Math.Clamp(sr * a + dstData[di + 2] * (1.0 - a), 0, 255); // R
+                    dstData[di + 3] = 255; // keep opaque
+                }
+            }
+
+            Marshal.Copy(dstData, 0, Doc.Image.Data, dstData.Length);
         }
     }
 
