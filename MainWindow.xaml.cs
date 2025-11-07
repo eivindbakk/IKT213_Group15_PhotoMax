@@ -5,20 +5,23 @@ using System.Windows.Ink;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
+using System.Windows.Threading;
 
 namespace PhotoMax
 {
     public partial class MainWindow : Window
     {
-        private readonly int[] _brushSizes = new[] { 2, 4, 8, 12, 16, 24, 36 };
-        private int _brushIndex = 2;
-        private Color _brushColor = Colors.Black;
-        private bool _eraseMode = false;
+        // ---- Brush state used by Tools.cs (partial) ----
+        internal readonly int[] _brushSizes = new[] { 2, 4, 8, 12, 16, 24, 36 };
+        internal int _brushIndex = 2;
+        internal Color _brushColor = Colors.Black;
+        internal bool _eraseMode = false;
 
-        private double _zoom = 1.0;
-        private const double ZoomStep = 1.25;
-        private const double MinZoom = 0.05;
-        private const double MaxZoom = 8.0;
+        // ---- Zoom/pan state ----
+        internal double _zoom = 1.0;
+        internal const double ZoomStep = 1.25;
+        internal const double MinZoom = 0.05;
+        internal const double MaxZoom = 8.0;
 
         // Panning (>100%)
         private bool _isSpaceDown = false;
@@ -27,9 +30,12 @@ namespace PhotoMax
         private double _panStartH, _panStartV;
 
         // Grid state
-        private bool _gridEnabled = true;
-        private Color _gridColor = Color.FromArgb(0x22, 0x00, 0x00, 0x00); // default alpha ≈ 13%
-        private double _gridSpacing = 32.0;
+        internal bool _gridEnabled = true;
+        internal Color _gridColor = Color.FromArgb(0x22, 0x00, 0x00, 0x00);
+        internal double _gridSpacing = 32.0;
+
+        // Image features controller (defined in MenuHandlers/Image.cs)
+        private ImageController? _img;
 
         // Current file
         private string? _currentFilePath = null;
@@ -42,19 +48,32 @@ namespace PhotoMax
 
             Loaded += (_, __) =>
             {
-                UpdateGridBrush();
-                SetZoomCentered(1.0);
-                StatusText.Content = "Ctrl+Wheel: zoom (center ≤100%, to-cursor >100%) • Space/Middle: pan";
-            };
+                _img = new ImageController(ImageView, Artboard, StatusText, PaintCanvas);
 
-            SizeChanged += (_, __) =>
-            {
-                if (_zoom <= 1.0 + 1e-9) SetZoomCentered(_zoom);
+                RenderOptions.SetBitmapScalingMode(PaintCanvas, BitmapScalingMode.NearestNeighbor);
+                RenderOptions.SetEdgeMode(PaintCanvas, EdgeMode.Aliased);
+                PaintCanvas.SnapsToDevicePixels = true;
+
+                _img.ImageChanged += () => ConfigureBrush();
+                Artboard.SizeChanged += (_, __) => ConfigureBrush();
+                SizeChanged += Window_SizeChanged;
+
+                UpdateGridBrush();
+                SetZoom(1.0, new Point(Scroller.ActualWidth / 2, Scroller.ActualHeight / 2));
+                StatusText.Content = "Ctrl+Wheel: zoom • Space/Middle: pan";
             };
 
             // Track changes when drawing/editing
             PaintCanvas.StrokeCollected += (_, __) => _hasUnsavedChanges = true;
             PaintCanvas.StrokeErased += (_, __) => _hasUnsavedChanges = true;
+        }
+
+        private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+             if (!CanvasExceedsViewport())
+             {
+                SetZoom(_zoom, new Point(Scroller.ActualWidth / 2, Scroller.ActualHeight / 2), false);
+             }
         }
 
         /* -------------------- GRID -------------------- */
@@ -63,18 +82,10 @@ namespace PhotoMax
             var penBrush = new SolidColorBrush(color);
             if (penBrush.CanFreeze) penBrush.Freeze();
             var pen = new Pen(penBrush, 1);
-
             var group = new GeometryGroup();
             group.Children.Add(new LineGeometry(new Point(0, 0), new Point(spacing, 0)));
             group.Children.Add(new LineGeometry(new Point(0, 0), new Point(0, spacing)));
-
-            var drawing = new GeometryDrawing
-            {
-                Brush = Brushes.Transparent,
-                Pen = pen,
-                Geometry = group
-            };
-
+            var drawing = new GeometryDrawing { Brush = Brushes.Transparent, Pen = pen, Geometry = group };
             var brush = new DrawingBrush(drawing)
             {
                 TileMode = TileMode.Tile,
@@ -91,94 +102,40 @@ namespace PhotoMax
             GridOverlay.Visibility = _gridEnabled ? Visibility.Visible : Visibility.Collapsed;
         }
 
-
-        /* -------------------- ZOOM CORE -------------------- */
-        private static bool AtOrBelowOne(double z) => z <= 1.0 + 1e-9;
-
-        private void ApplyZoom_NoScroll(double newZoom)
+        /* -------------------- UNIFIED ZOOM CORE -------------------- */
+        private void SetZoom(double newZoom, Point mousePosition, bool updateZoomValue = true)
         {
-            _zoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
+            var oldZoom = _zoom;
+            if (updateZoomValue)
+            {
+                 _zoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
+            }
 
-            LayoutScale.ScaleX = 1.0;
-            LayoutScale.ScaleY = 1.0;
-            RenderScale.ScaleX = _zoom;
-            RenderScale.ScaleY = _zoom;
-
-            Scroller.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-            Scroller.VerticalScrollBarVisibility   = ScrollBarVisibility.Disabled;
-
-            Workspace.UpdateLayout();
-            Scroller.ScrollToHorizontalOffset(0);
-            Scroller.ScrollToVerticalOffset(0);
-
-            StatusText.Content = $"Zoom: {(int)Math.Round(_zoom * 100)}%";
-        }
-
-        private void ApplyZoom_WithScroll(double newZoom)
-        {
-            _zoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
-
-            RenderScale.ScaleX = 1.0;
-            RenderScale.ScaleY = 1.0;
+            RenderScale.ScaleX = 1;
+            RenderScale.ScaleY = 1;
             LayoutScale.ScaleX = _zoom;
             LayoutScale.ScaleY = _zoom;
 
-            Scroller.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
-            Scroller.VerticalScrollBarVisibility   = ScrollBarVisibility.Auto;
+            var targetX = Scroller.HorizontalOffset + mousePosition.X;
+            var targetY = Scroller.VerticalOffset + mousePosition.Y;
 
-            Workspace.UpdateLayout();
+            var newOffsetX = (targetX * (_zoom / oldZoom)) - mousePosition.X;
+            var newOffsetY = (targetY * (_zoom / oldZoom)) - mousePosition.Y;
+            
+            if (Artboard.ActualWidth * _zoom < Scroller.ViewportWidth)
+            {
+                newOffsetX = (Artboard.ActualWidth * _zoom - Scroller.ViewportWidth) / 2;
+            }
+            if (Artboard.ActualHeight * _zoom < Scroller.ViewportHeight)
+            {
+                newOffsetY = (Artboard.ActualHeight * _zoom - Scroller.ViewportHeight) / 2;
+            }
+
+            Scroller.ScrollToHorizontalOffset(newOffsetX);
+            Scroller.ScrollToVerticalOffset(newOffsetY);
 
             StatusText.Content = $"Zoom: {(int)Math.Round(_zoom * 100)}%";
-        }
-
-        private void SetZoomCentered(double newZoom)
-        {
-            if (AtOrBelowOne(newZoom))
-            {
-                ApplyZoom_NoScroll(newZoom);
-            }
-            else
-            {
-                ApplyZoom_WithScroll(newZoom);
-                var centerContent = new Point(
-                    Math.Max(1, Workspace.ActualWidth)  / 2.0,
-                    Math.Max(1, Workspace.ActualHeight) / 2.0
-                );
-                CenterOnContentPoint(centerContent);
-            }
-        }
-
-        private void SetZoomToCursor(double newZoom, Point mouseViewport, Point mouseContentBefore)
-        {
-            ApplyZoom_WithScroll(newZoom);
-
-            Point topLeftAfter = Workspace.TransformToVisual(Root).Transform(new Point(0, 0));
-
-            double h = topLeftAfter.X + mouseContentBefore.X * _zoom - mouseViewport.X;
-            double v = topLeftAfter.Y + mouseContentBefore.Y * _zoom - mouseViewport.Y;
-
-            double maxH = Math.Max(0, Scroller.ExtentWidth  - Scroller.ViewportWidth);
-            double maxV = Math.Max(0, Scroller.ExtentHeight - Scroller.ViewportHeight);
-
-            Scroller.ScrollToHorizontalOffset(Math.Clamp(h, 0, maxH));
-            Scroller.ScrollToVerticalOffset(Math.Clamp(v, 0, maxV));
-        }
-
-        private void CenterOnContentPoint(Point contentPoint)
-        {
-            Point topLeft = Workspace.TransformToVisual(Root).Transform(new Point(0, 0));
-
-            double cx = topLeft.X + contentPoint.X * _zoom;
-            double cy = topLeft.Y + contentPoint.Y * _zoom;
-
-            double targetH = cx - Scroller.ViewportWidth  / 2.0;
-            double targetV = cy - Scroller.ViewportHeight / 2.0;
-
-            double maxH = Math.Max(0, Scroller.ExtentWidth  - Scroller.ViewportWidth);
-            double maxV = Math.Max(0, Scroller.ExtentHeight - Scroller.ViewportHeight);
-
-            Scroller.ScrollToHorizontalOffset(Math.Clamp(targetH, 0, maxH));
-            Scroller.ScrollToVerticalOffset(Math.Clamp(targetV, 0, maxV));
+            OnZoomChanged_UpdateBrushPreview();
         }
 
         /* -------------------- WHEEL ZOOM -------------------- */
@@ -187,47 +144,37 @@ namespace PhotoMax
             if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
                 return;
 
-            double next = _zoom * (e.Delta > 0 ? ZoomStep : 1.0 / ZoomStep);
-
-            if (AtOrBelowOne(next))
-            {
-                ApplyZoom_NoScroll(next);
-            }
-            else
-            {
-                Point pBefore = e.GetPosition(Workspace);
-                Point mViewport = e.GetPosition(Scroller);
-                SetZoomToCursor(next, mViewport, pBefore);
-            }
-
+            var mousePos = e.GetPosition(Scroller);
+            var nextZoom = _zoom * (e.Delta > 0 ? ZoomStep : 1.0 / ZoomStep);
+            
+            SetZoom(nextZoom, mousePos);
+            
             e.Handled = true;
         }
 
-        /* -------------------- ZOOM BUTTONS -------------------- */
-
-        private Point ViewportPointToWorkspaceBeforeZoom(Point viewportPoint)
+        /* -------------------- Backward Compatibility Stubs (for Tools.cs) -------------------- */
+        internal static bool AtOrBelowOne(double z) => z <= 1.0 + 1e-9;
+        internal bool CanvasExceedsViewport() => Artboard.ActualWidth * _zoom > Scroller.ViewportWidth || Artboard.ActualHeight * _zoom > Scroller.ViewportHeight;
+        internal void ApplyZoom_NoScroll(double newZoom) => SetZoom(newZoom, new Point(Scroller.ActualWidth / 2, Scroller.ActualHeight / 2));
+        internal void SetZoomCentered(double newZoom) => SetZoom(newZoom, new Point(Scroller.ActualWidth / 2, Scroller.ActualHeight / 2));
+        internal void SetZoomToCursor(double newZoom, Point mouseViewport, Point mouseContentBefore) => SetZoom(newZoom, mouseViewport);
+        internal Point ViewportPointToWorkspaceBeforeZoom(Point viewportPoint)
         {
-            Point inContent = new Point(Scroller.HorizontalOffset + viewportPoint.X,
-                                        Scroller.VerticalOffset   + viewportPoint.Y);
-            GeneralTransform toWorkspace = Root.TransformToVisual(Workspace);
-            return toWorkspace.Transform(inContent);
+            Point inContent = new Point(Scroller.HorizontalOffset + viewportPoint.X, Scroller.VerticalOffset + viewportPoint.Y);
+            return Root.TransformToVisual(Workspace).Transform(inContent);
         }
 
+        internal void OnZoomChanged_UpdateBrushPreview()
+        {
+            SyncBrushPreviewStrokeToZoom();
+        }
 
         /* -------------------- PANNING -------------------- */
-        private void Scroller_PreviewKeyDown(object sender, KeyEventArgs e)
-        {
-            if (e.Key == Key.Space) _isSpaceDown = true;
-        }
-
-        private void Scroller_PreviewKeyUp(object sender, KeyEventArgs e)
-        {
-            if (e.Key == Key.Space) _isSpaceDown = false;
-        }
-
+        private void Scroller_PreviewKeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Space) _isSpaceDown = true; }
+        private void Scroller_PreviewKeyUp(object sender, KeyEventArgs e) { if (e.Key == Key.Space) _isSpaceDown = false; }
         private void Scroller_PreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
-            if (_isSpaceDown || e.MiddleButton == MouseButtonState.Pressed)
+            if ((_isSpaceDown || e.MiddleButton == MouseButtonState.Pressed) && CanvasExceedsViewport())
             {
                 _isPanning = true;
                 _panStartMouse = e.GetPosition(this);
@@ -238,7 +185,6 @@ namespace PhotoMax
                 e.Handled = true;
             }
         }
-
         private void Scroller_PreviewMouseMove(object sender, MouseEventArgs e)
         {
             if (_isPanning)
@@ -249,7 +195,6 @@ namespace PhotoMax
                 e.Handled = true;
             }
         }
-
         private void Scroller_PreviewMouseUp(object sender, MouseButtonEventArgs e)
         {
             if (_isPanning)
@@ -264,35 +209,17 @@ namespace PhotoMax
         /* -------------------- ARTBOARD RESIZE -------------------- */
         private void SetArtboardSize(double width, double height)
         {
-            Artboard.Width = width;
-            Artboard.Height = height;
-            ImageView.Width = width;
-            ImageView.Height = height;
-            PaintCanvas.Width = width;
-            PaintCanvas.Height = height;
-
-            if (_zoom <= 1.0 + 1e-9) SetZoomCentered(_zoom);
+            Artboard.Width = width; Artboard.Height = height;
+            ImageView.Width = width; ImageView.Height = height;
+            PaintCanvas.Width = width; PaintCanvas.Height = height;
+            Dispatcher.BeginInvoke(new Action(() => {
+                SetZoom(_zoom, new Point(Scroller.ActualWidth/2, Scroller.ActualHeight/2), false);
+            }), DispatcherPriority.Loaded);
+            ConfigureBrush();
         }
 
-        /* -------------------- PAINTING -------------------- */
-        private void ConfigureBrush()
-        {
-            var da = PaintCanvas.DefaultDrawingAttributes;
-            da.Color = _brushColor;
-            da.IgnorePressure = true;
-            da.FitToCurve = false;
-            da.Width = _brushSizes[_brushIndex];
-            da.Height = _brushSizes[_brushIndex];
-            PaintCanvas.EditingMode = _eraseMode
-                ? InkCanvasEditingMode.EraseByPoint
-                : InkCanvasEditingMode.Ink;
-
-            StatusText.Content = _eraseMode
-                ? $"Eraser ON • Size: {_brushSizes[_brushIndex]} px"
-                : $"Brush • Color: #{_brushColor.R:X2}{_brushColor.G:X2}{_brushColor.B:X2} • Size: {_brushSizes[_brushIndex]} px";
-        }
-
-        /* -------------------- DRAG AND DROP -------------------- */
+        /* -------------------- BRUSH WRAPPER -------------------- */
+        private void ConfigureBrush() { ApplyInkBrushAttributes(); }
         private void ImageView_Drop(object sender, DragEventArgs e) => MessageBox.Show("TODO: Drag-and-drop open.");
     }
 }
