@@ -4,12 +4,22 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Ink;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using OpenCvSharp;
+using Microsoft.VisualBasic;
 using WF = System.Windows.Forms;
+
+// ---- Aliases to avoid type clashes ----
+using WpfPoint = System.Windows.Point;
+using WpfRect  = System.Windows.Rect;
+using WpfSize  = System.Windows.Size;
+using CvPoint  = OpenCvSharp.Point;
+using CvSize   = OpenCvSharp.Size;
 
 namespace PhotoMax
 {
@@ -20,11 +30,28 @@ namespace PhotoMax
         private WriteableBitmap? _liveWB;          // BGRA32, same size as Doc
         private byte[]? _liveBuf;                  // backing buffer for _liveWB
         private bool _isDrawing = false;
-        private readonly List<Point> _snappedPoints = new();
+        private readonly List<WpfPoint> _snappedPoints = new();
 
         // Cursor preview (zoom-aware outline of true stamp footprint)
         private Rectangle? _brushPreview;          // outline showing true brush footprint
         private bool _liveHooks = false;
+
+        // ----------------- Text tool (interactive) -----------------
+        private enum TextPhase { None, Arming, Dragging, Editing }
+        private TextPhase _textPhase = TextPhase.None;
+        private bool _textToolArmed = false;
+
+        private Rectangle? _textDragRect;          // rubber-band while dragging
+        private Border? _textBorder;               // visual box
+        private TextBox? _textEditor;              // live editor (wraps)
+        private readonly List<Rectangle> _textHandles = new(); // 4 corner handles
+        private double _textFontPx = 24;           // default font size (px)
+        private WpfPoint _textDragStart;           // start of box (image px)
+        private WpfPoint _moveStart;               // move/resize helpers
+        private WpfRect _boxStart;                 // box snapshot at begin drag
+        private bool _isMoving = false;
+        private bool _isResizing = false;
+        private string _resizeCorner = "";         // "NW","NE","SW","SE"
 
         // ----------------- ZOOM -----------------
         private void Zoom_In_Click(object sender, RoutedEventArgs e)
@@ -36,7 +63,7 @@ namespace PhotoMax
             }
             else
             {
-                var m = new Point(Scroller.ViewportWidth / 2.0, Scroller.ViewportHeight / 2.0);
+                var m = new WpfPoint(Scroller.ViewportWidth / 2.0, Scroller.ViewportHeight / 2.0);
                 var p = ViewportPointToWorkspaceBeforeZoom(m);
                 SetZoomToCursor(next, m, p);
             }
@@ -51,7 +78,7 @@ namespace PhotoMax
             }
             else
             {
-                var m = new Point(Scroller.ViewportWidth / 2.0, Scroller.ViewportHeight / 2.0);
+                var m = new WpfPoint(Scroller.ViewportWidth / 2.0, Scroller.ViewportHeight / 2.0);
                 var p = ViewportPointToWorkspaceBeforeZoom(m);
                 SetZoomToCursor(next, m, p);
             }
@@ -73,8 +100,6 @@ namespace PhotoMax
         }
 
         // ----------------- BRUSH CORE -----------------
-
-        /// <summary>Effective brush size in image pixels, based on palette + image size.</summary>
         private int ComputeEffectiveBrushSizePx()
         {
             int imgMin = 0;
@@ -82,12 +107,11 @@ namespace PhotoMax
                 imgMin = System.Math.Max(1, System.Math.Min(_img.Doc.Width, _img.Doc.Height));
 
             int baseSize = _brushSizes[_brushIndex];
-            int minPx   = imgMin > 0 ? System.Math.Max(1, imgMin / 24) : 1; // tune divisor
+            int minPx   = imgMin > 0 ? System.Math.Max(1, imgMin / 24) : 1;
             int eff     = System.Math.Max(baseSize, minPx);
             return System.Math.Clamp(eff, 1, 256);
         }
 
-        /// <summary>Clamp the brush center so the whole eff×eff stamp fits inside the image.</summary>
         private static (int cx, int cy) ClampCenterToFit(int cx, int cy, int eff, int w, int h)
         {
             int half = eff / 2;
@@ -100,14 +124,12 @@ namespace PhotoMax
             return (cx, cy);
         }
 
-        /// <summary>Called from MainWindow.ConfigureBrush(). Sets ink attributes and hooks live drawing/preview.</summary>
         internal void ApplyInkBrushAttributes()
         {
-            // We render ourselves, so disable InkCanvas' own strokes/cursor to avoid any extra squares.
+            // In brush mode we hide system cursor and draw our own outline
             PaintCanvas.EditingMode = InkCanvasEditingMode.None;
-            PaintCanvas.Cursor = Cursors.None; // hide system cursor over canvas (we show our outline instead)
+            if (!_textToolArmed) PaintCanvas.Cursor = Cursors.None;
 
-            // DA irrelevant while EditingMode=None
             var da = PaintCanvas.DefaultDrawingAttributes;
             da.IsHighlighter = false;
             da.IgnorePressure = true;
@@ -118,18 +140,15 @@ namespace PhotoMax
             da.Width = 1;
             da.Height = 1;
 
-            // Rendering hints (keep aliasing)
             RenderOptions.SetBitmapScalingMode(PaintCanvas, BitmapScalingMode.NearestNeighbor);
             RenderOptions.SetEdgeMode(PaintCanvas, EdgeMode.Aliased);
             PaintCanvas.SnapsToDevicePixels = true;
 
-            // Strict bitmap overlay + input hooks
             EnsureLiveOverlayBitmap();
             HookLiveDrawingEvents();
 
-            // Brush preview outline (zoom-aware)
             EnsureBrushPreview();
-            UpdateBrushPreviewVisibility(true);
+            UpdateBrushPreviewVisibility(!_textToolArmed);
             SyncBrushPreviewStrokeToZoom();
             SyncBrushPreviewColor();
 
@@ -190,22 +209,28 @@ namespace PhotoMax
             if (_liveHooks) return;
             _liveHooks = true;
 
+            // Brush live drawing (already uses Preview*)
             PaintCanvas.PreviewMouseDown += PaintCanvas_PreviewMouseDown_BeginDraw;
             PaintCanvas.PreviewMouseMove += PaintCanvas_PreviewMouseMove_Draw;
             PaintCanvas.PreviewMouseUp   += PaintCanvas_PreviewMouseUp_EndDraw;
 
-            // Preview rectangle follow + visibility lifecycle
+            // Text tool — use Preview* so TextBox can't swallow the events
+            PaintCanvas.PreviewMouseLeftButtonDown += Text_OnCanvasMouseDown;
+            PaintCanvas.PreviewMouseMove           += Text_OnCanvasMouseMove;
+            PaintCanvas.PreviewMouseLeftButtonUp   += Text_OnCanvasMouseUp;
+            PaintCanvas.PreviewKeyDown             += Text_OnPreviewKeyDown;
+
             PaintCanvas.MouseMove  += PaintCanvas_MouseMove_UpdatePreview;
             PaintCanvas.MouseLeave += (_, __) =>
             {
                 UpdateBrushPreviewVisibility(false);
-                PaintCanvas.Cursor = Cursors.Arrow; // restore cursor when leaving
+                if (!_textToolArmed) PaintCanvas.Cursor = Cursors.Arrow;
             };
             PaintCanvas.MouseEnter += (s, e) =>
             {
-                PaintCanvas.Cursor = Cursors.None;  // hide cursor on enter
-                UpdateBrushPreviewVisibility(true);
-                UpdateBrushPreviewAt(e.GetPosition(PaintCanvas)); // position immediately
+                if (!_textToolArmed) PaintCanvas.Cursor = Cursors.None;
+                UpdateBrushPreviewVisibility(!_textToolArmed);
+                if (!_textToolArmed) UpdateBrushPreviewAt(e.GetPosition(PaintCanvas));
             };
 
             if (_img != null) _img.ImageChanged += EnsureLiveOverlayBitmap;
@@ -213,6 +238,7 @@ namespace PhotoMax
 
         private void PaintCanvas_PreviewMouseDown_BeginDraw(object? sender, MouseButtonEventArgs e)
         {
+            if (_textToolArmed) return;
             if (_img == null || _img.Doc == null) return;
             EnsureLiveOverlayBitmap();
 
@@ -225,9 +251,8 @@ namespace PhotoMax
             int eff = ComputeEffectiveBrushSizePx();
             int w = _img.Doc.Width, h = _img.Doc.Height;
 
-            // Clamp center so full stamp fits
             var fit = ClampCenterToFit((int)s.X, (int)s.Y, eff, w, h);
-            s = new Point(fit.cx, fit.cy);
+            s = new WpfPoint(fit.cx, fit.cy);
             _snappedPoints.Add(s);
 
             FillSquareIntoOverlay(fit.cx, fit.cy, eff, _eraseMode ? Colors.White : _brushColor);
@@ -239,6 +264,7 @@ namespace PhotoMax
 
         private void PaintCanvas_PreviewMouseMove_Draw(object? sender, MouseEventArgs e)
         {
+            if (_textToolArmed) return;
             if (!_isDrawing) return;
             if (_img == null || _img.Doc == null) return;
 
@@ -248,9 +274,8 @@ namespace PhotoMax
             int eff = ComputeEffectiveBrushSizePx();
             int w = _img.Doc.Width, h = _img.Doc.Height;
 
-            // Clamp center so full stamp fits
             var fit = ClampCenterToFit((int)s.X, (int)s.Y, eff, w, h);
-            s = new Point(fit.cx, fit.cy);
+            s = new WpfPoint(fit.cx, fit.cy);
 
             var last = _snappedPoints[^1];
             if ((int)last.X != (int)s.X || (int)last.Y != (int)s.Y)
@@ -268,6 +293,7 @@ namespace PhotoMax
 
         private void PaintCanvas_PreviewMouseUp_EndDraw(object? sender, MouseButtonEventArgs e)
         {
+            if (_textToolArmed) return;
             if (!_isDrawing) return;
             _isDrawing = false;
             PaintCanvas.ReleaseMouseCapture();
@@ -279,7 +305,7 @@ namespace PhotoMax
         }
 
         // Snap to integer pixel inside image bounds (center may still be adjusted later)
-        private Point SnapToImagePixel(Point p)
+        private WpfPoint SnapToImagePixel(WpfPoint p)
         {
             int x = (int)System.Math.Round(p.X);
             int y = (int)System.Math.Round(p.Y);
@@ -292,7 +318,7 @@ namespace PhotoMax
                 x = System.Math.Clamp(x, 0, System.Math.Max(0, w - 1));
                 y = System.Math.Clamp(y, 0, System.Math.Max(0, h - 1));
             }
-            return new Point(x, y);
+            return new WpfPoint(x, y);
         }
 
         // "Supercover" line: all grid cells a line passes through
@@ -405,9 +431,9 @@ namespace PhotoMax
 
             _brushPreview = new Rectangle
             {
-                Stroke = new SolidColorBrush(_brushColor), // match chosen color
-                Fill = Brushes.Transparent,                // outline-only
-                StrokeThickness = 1,                       // normalized to screen px
+                Stroke = new SolidColorBrush(_brushColor),
+                Fill = Brushes.Transparent,
+                StrokeThickness = 1,
                 IsHitTestVisible = false,
                 Visibility = Visibility.Collapsed
             };
@@ -424,7 +450,7 @@ namespace PhotoMax
             _brushPreview.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private void UpdateBrushPreviewAt(Point canvasPos)
+        private void UpdateBrushPreviewAt(WpfPoint canvasPos)
         {
             if (_brushPreview == null) return;
             if (_img == null || _img.Doc == null) { UpdateBrushPreviewVisibility(false); return; }
@@ -433,7 +459,6 @@ namespace PhotoMax
             int eff = ComputeEffectiveBrushSizePx();
             int w = _img.Doc.Width, h = _img.Doc.Height;
 
-            // Force whole stamp to remain inside by adjusting center
             var fit = ClampCenterToFit((int)s.X, (int)s.Y, eff, w, h);
 
             int left = fit.cx - eff / 2;
@@ -455,6 +480,7 @@ namespace PhotoMax
 
         private void PaintCanvas_MouseMove_UpdatePreview(object? sender, MouseEventArgs e)
         {
+            if (_textToolArmed) return;
             UpdateBrushPreviewAt(e.GetPosition(PaintCanvas));
         }
 
@@ -481,10 +507,45 @@ namespace PhotoMax
             _brushPreview.Stroke = new SolidColorBrush(_brushColor);
         }
 
+        // ----------------- Helpers -----------------
+        private bool EnsureImageOpen()
+        {
+            if (_img == null || _img.Doc == null || _img.Doc.Image.Empty())
+            {
+                MessageBox.Show("Open an image first.");
+                return false;
+            }
+            return true;
+        }
+
+        private WpfRect ClampRectToImage(WpfRect r)
+        {
+            if (_img?.Doc == null) return r;
+            int w = _img.Doc.Width, h = _img.Doc.Height;
+            double x = Math.Clamp(r.X, 0.0, (double)Math.Max(0, w - 1));
+            double y = Math.Clamp(r.Y, 0.0, (double)Math.Max(0, h - 1));
+            double right  = Math.Clamp(r.X + r.Width,  0.0, (double)w);
+            double bottom = Math.Clamp(r.Y + r.Height, 0.0, (double)h);
+            double width  = Math.Max(1.0, right - x);
+            double height = Math.Max(1.0, bottom - y);
+            return new WpfRect(x, y, width, height);
+        }
+
+        private void PlaceOnCanvas(FrameworkElement fe, double x, double y, double w, double h)
+        {
+            InkCanvas.SetLeft(fe, x);
+            InkCanvas.SetTop (fe, y);
+            fe.Width  = w;
+            fe.Height = h;
+        }
+
         // ----------------- Menu actions -----------------
         private void Tool_Erase_Click(object sender, RoutedEventArgs e)
         {
             _eraseMode = !_eraseMode;
+            Text_Disarm();
+            PaintCanvas.Cursor = Cursors.None;
+            UpdateBrushPreviewVisibility(true);
             ApplyInkBrushAttributes();
         }
 
@@ -495,37 +556,520 @@ namespace PhotoMax
             {
                 _brushColor = Color.FromRgb(dlg.Color.R, dlg.Color.G, dlg.Color.B);
                 _eraseMode = false;
-                ApplyInkBrushAttributes(); // updates preview color
+                UpdateBrushPreviewVisibility(!_textToolArmed);
+                ApplyInkBrushAttributes();
+                if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_brushColor);
             }
         }
 
         private void Tool_Brushes_Click(object sender, RoutedEventArgs e)
         {
             _eraseMode = false;
+            Text_Disarm();
+            PaintCanvas.Cursor = Cursors.None;
+            UpdateBrushPreviewVisibility(true);
             ApplyInkBrushAttributes();
+            StatusText.Content = "Paint Brushes enabled.";
         }
 
+        // ---------- Text Box (interactive) ----------
         private void Tool_TextBox_Click(object sender, RoutedEventArgs e)
         {
-            MessageBox.Show("TODO: Text box tool.");
+            if (!EnsureImageOpen()) return;
+
+            Text_Disarm(); // clear any existing
+            _textToolArmed = true;
+            _textPhase = TextPhase.Arming;
+            UpdateBrushPreviewVisibility(false);
+            PaintCanvas.Cursor = Cursors.Cross;
+            StatusText.Content = "Text: drag to create a box; right-click for size/commit.";
         }
 
-        private void Filter_Gaussian_Click(object sender, RoutedEventArgs e) =>
-            MessageBox.Show("TODO: Gaussian (OpenCvSharp).");
+        private void Text_OnCanvasMouseDown(object? sender, MouseButtonEventArgs e)
+        {
+            if (!_textToolArmed) return;
 
-        private void Filter_Sobel_Click(object sender, RoutedEventArgs e) =>
-            MessageBox.Show("TODO: Sobel (OpenCvSharp).");
+            var pos = SnapToImagePixel(e.GetPosition(PaintCanvas));
 
-        private void Filter_Binary_Click(object sender, RoutedEventArgs e) =>
-            MessageBox.Show("TODO: Binary threshold.");
+            // If an existing box is present, check for move/resize begin
+            if (_textPhase == TextPhase.Editing && _textBorder != null)
+            {
+                var box = new WpfRect(InkCanvas.GetLeft(_textBorder), InkCanvas.GetTop(_textBorder), _textBorder.Width, _textBorder.Height);
+                if (IsOverHandle(pos, out string corner))
+                {
+                    _isResizing = true; _resizeCorner = corner;
+                    _boxStart = box; _moveStart = pos;
+                    PaintCanvas.CaptureMouse();
+                    e.Handled = true; return;  // important: stop TextBox selection
+                }
+                if (box.Contains(pos))
+                {
+                    _isMoving = true; _boxStart = box; _moveStart = pos;
+                    PaintCanvas.CaptureMouse();
+                    e.Handled = true; return;  // important: stop TextBox selection
+                }
+            }
 
-        private void Filter_HistogramThreshold_Click(object sender, RoutedEventArgs e) =>
-            MessageBox.Show("TODO: Histogram threshold.");
+            if (_textPhase == TextPhase.Arming)
+            {
+                _textPhase = TextPhase.Dragging;
+                _textDragStart = pos;
+
+                _textDragRect = new Rectangle
+                {
+                    Stroke = Brushes.DeepSkyBlue,
+                    StrokeThickness = 1,
+                    StrokeDashArray = new DoubleCollection { 3, 2 },
+                    Fill = Brushes.Transparent,
+                    IsHitTestVisible = false
+                };
+                Panel.SetZIndex(_textDragRect, 1005);
+                PaintCanvas.Children.Add(_textDragRect);
+                PlaceOnCanvas(_textDragRect, pos.X, pos.Y, 1, 1);
+
+                PaintCanvas.CaptureMouse();
+                e.Handled = true;
+            }
+        }
+
+        private void Text_OnCanvasMouseMove(object? sender, MouseEventArgs e)
+        {
+            if (!_textToolArmed) return;
+
+            var p = SnapToImagePixel(e.GetPosition(PaintCanvas));
+            if (_textPhase == TextPhase.Dragging && _textDragRect != null)
+            {
+                var x = Math.Min(_textDragStart.X, p.X);
+                var y = Math.Min(_textDragStart.Y, p.Y);
+                var w = Math.Abs(p.X - _textDragStart.X);
+                var h = Math.Abs(p.Y - _textDragStart.Y);
+                if (w < 1) w = 1; if (h < 1) h = 1;
+                var r = ClampRectToImage(new WpfRect(x, y, w, h));
+                PlaceOnCanvas(_textDragRect, r.X, r.Y, r.Width, r.Height);
+                e.Handled = true;
+            }
+            else if (_isMoving && _textBorder != null)
+            {
+                var dx = p.X - _moveStart.X;
+                var dy = p.Y - _moveStart.Y;
+                var r = new WpfRect(_boxStart.X + dx, _boxStart.Y + dy, _boxStart.Width, _boxStart.Height);
+                r = ClampRectToImage(r);
+                PlaceOnCanvas(_textBorder, r.X, r.Y, r.Width, r.Height);
+                UpdateTextHandles();
+                e.Handled = true;
+            }
+            else if (_isResizing && _textBorder != null)
+            {
+                var r = _boxStart;
+                double dx = p.X - _moveStart.X;
+                double dy = p.Y - _moveStart.Y;
+
+                switch (_resizeCorner)
+                {
+                    case "NW": r = new WpfRect(r.X + dx, r.Y + dy, r.Width - dx, r.Height - dy); break;
+                    case "NE": r = new WpfRect(r.X,       r.Y + dy, r.Width + dx, r.Height - dy); break;
+                    case "SW": r = new WpfRect(r.X + dx,  r.Y,      r.Width - dx, r.Height + dy); break;
+                    case "SE": r = new WpfRect(r.X,       r.Y,      r.Width + dx, r.Height + dy); break;
+                }
+                if (r.Width < 1) r.Width = 1; if (r.Height < 1) r.Height = 1;
+                r = ClampRectToImage(r);
+
+                PlaceOnCanvas(_textBorder, r.X, r.Y, r.Width, r.Height);
+                UpdateTextHandles();
+                e.Handled = true;
+            }
+        }
+
+        private void Text_OnCanvasMouseUp(object? sender, MouseButtonEventArgs e)
+        {
+            if (!_textToolArmed) return;
+
+            if (_textPhase == TextPhase.Dragging && _textDragRect != null)
+            {
+                // finalize box and enter editing
+                var r = new WpfRect(InkCanvas.GetLeft(_textDragRect), InkCanvas.GetTop(_textDragRect), _textDragRect.Width, _textDragRect.Height);
+                PaintCanvas.Children.Remove(_textDragRect);
+                _textDragRect = null;
+
+                CreateTextOverlay(r);
+                _textPhase = TextPhase.Editing;
+                PaintCanvas.ReleaseMouseCapture();
+                e.Handled = true;
+                return;
+            }
+
+            if (_isMoving || _isResizing)
+            {
+                _isMoving = false; _isResizing = false; _resizeCorner = "";
+                PaintCanvas.ReleaseMouseCapture();
+                e.Handled = true;
+            }
+        }
+
+        private void Text_OnPreviewKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (!_textToolArmed) return;
+            if (_textEditor == null) return;
+
+            if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                Text_Commit();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                Text_Disarm();
+                e.Handled = true;
+            }
+        }
+
+        private void CreateTextOverlay(WpfRect r)
+        {
+            // container
+            _textBorder = new Border
+            {
+                BorderBrush = Brushes.DeepSkyBlue,
+                BorderThickness = new Thickness(1),
+                Background = Brushes.Transparent,
+                SnapsToDevicePixels = true
+            };
+            Panel.SetZIndex(_textBorder, 1006);
+
+            _textEditor = new TextBox
+            {
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = new SolidColorBrush(_brushColor),
+                FontSize = _textFontPx,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                Padding = new Thickness(2),
+                SpellCheck = { IsEnabled = false }
+            };
+
+            // right-click menu (attach to BOTH border and editor)
+            var cm = new ContextMenu();
+            MenuItem inc = new MenuItem { Header = "Font Size +2" };
+            MenuItem dec = new MenuItem { Header = "Font Size -2" };
+            MenuItem set = new MenuItem { Header = "Set Font Size..." };
+            MenuItem commit = new MenuItem { Header = "Commit (Ctrl+Enter)" };
+            MenuItem cancel = new MenuItem { Header = "Cancel (Esc)" };
+            inc.Click += (_, __) => { _textFontPx = Math.Clamp(_textFontPx + 2, 6, 256); if (_textEditor != null) _textEditor.FontSize = _textFontPx; };
+            dec.Click += (_, __) => { _textFontPx = Math.Clamp(_textFontPx - 2, 6, 256); if (_textEditor != null) _textEditor.FontSize = _textFontPx; };
+            set.Click += (_, __) =>
+            {
+                string s = Interaction.InputBox("Font size (px):", "Text", _textFontPx.ToString());
+                if (int.TryParse(s, out int px)) { _textFontPx = Math.Clamp(px, 6, 256); if (_textEditor != null) _textEditor.FontSize = _textFontPx; }
+            };
+            commit.Click += (_, __) => Text_Commit();
+            cancel.Click += (_, __) => Text_Disarm();
+            cm.Items.Add(inc); cm.Items.Add(dec); cm.Items.Add(new Separator());
+            cm.Items.Add(set); cm.Items.Add(new Separator());
+            cm.Items.Add(commit); cm.Items.Add(cancel);
+            _textBorder.ContextMenu = cm;
+            _textEditor.ContextMenu = cm;       // <- important
+
+            _textBorder.Child = _textEditor;
+            PaintCanvas.Children.Add(_textBorder);
+            PlaceOnCanvas(_textBorder, r.X, r.Y, r.Width, r.Height);
+
+            // handles
+            CreateTextHandles();
+            UpdateTextHandles();
+
+            // focus text
+            _textEditor.Focus();
+            _textEditor.CaretIndex = _textEditor.Text.Length;
+
+            PaintCanvas.Cursor = Cursors.IBeam;
+            StatusText.Content = "Text editing: type; drag to move; drag corners to resize; right-click for options.";
+        }
+
+        private void CreateTextHandles()
+        {
+            foreach (var h in _textHandles) PaintCanvas.Children.Remove(h);
+            _textHandles.Clear();
+
+            _textHandles.Add(MakeHandle("NW"));
+            _textHandles.Add(MakeHandle("NE"));
+            _textHandles.Add(MakeHandle("SW"));
+            _textHandles.Add(MakeHandle("SE"));
+        }
+
+        private Rectangle MakeHandle(string tag)
+        {
+            var r = new Rectangle
+            {
+                Width = 8, Height = 8,                 // a bit bigger
+                Fill = Brushes.DeepSkyBlue,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1,
+                Tag = tag,
+                IsHitTestVisible = true
+            };
+            Panel.SetZIndex(r, 1007);
+            r.MouseLeftButtonDown += (s, e) =>
+            {
+                if (!_textToolArmed || _textPhase != TextPhase.Editing || _textBorder == null) return;
+                _isResizing = true;
+                _resizeCorner = (string)((FrameworkElement)s!).Tag;
+                _boxStart = new WpfRect(InkCanvas.GetLeft(_textBorder), InkCanvas.GetTop(_textBorder), _textBorder.Width, _textBorder.Height);
+                _moveStart = SnapToImagePixel(e.GetPosition(PaintCanvas));
+                PaintCanvas.CaptureMouse();
+                e.Handled = true; // stop bubbling to TextBox
+            };
+            return r;
+        }
+
+        private void UpdateTextHandles()
+        {
+            if (_textBorder == null) return;
+            var x = InkCanvas.GetLeft(_textBorder);
+            var y = InkCanvas.GetTop(_textBorder);
+            var w = _textBorder.Width;
+            var h = _textBorder.Height;
+
+            foreach (var hnd in _textHandles)
+            {
+                string t = (string)hnd.Tag;
+                double hx = t.Contains("W") ? x - 4 : x + w - 4;
+                double hy = t.Contains("N") ? y - 4 : y + h - 4;
+                PlaceOnCanvas(hnd, hx, hy, 8, 8);
+                if (!PaintCanvas.Children.Contains(hnd)) PaintCanvas.Children.Add(hnd);
+            }
+        }
+
+        private bool IsOverHandle(WpfPoint p, out string corner)
+        {
+            foreach (var h in _textHandles)
+            {
+                var r = new WpfRect(InkCanvas.GetLeft(h), InkCanvas.GetTop(h), h.Width, h.Height);
+                if (r.Contains(p)) { corner = (string)h.Tag; return true; }
+            }
+            corner = "";
+            return false;
+        }
+
+        private void Text_Commit()
+        {
+            if (_textBorder == null || _textEditor == null || _img?.Doc == null) return;
+
+            // Render text area to bitmap
+            int w = (int)Math.Round(_textBorder.Width);
+            int h = (int)Math.Round(_textBorder.Height);
+            if (w < 1 || h < 1) { Text_Disarm(); return; }
+
+            // Create a clean visual (TextBlock) to avoid caret rendering
+            var tb = new TextBlock
+            {
+                Text = _textEditor.Text,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(_brushColor),
+                FontSize = _textFontPx,
+                Background = Brushes.Transparent,
+                Width = w,
+                Height = h,
+                Padding = new Thickness(2)
+            };
+            tb.Measure(new WpfSize(w, h));
+            tb.Arrange(new WpfRect(0, 0, w, h));
+
+            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(tb);
+
+            var stride = w * 4;
+            var pbgra = new byte[h * stride];
+            rtb.CopyPixels(pbgra, stride, 0);
+
+            // Un-premultiply to straight BGRA
+            var bgra = new byte[pbgra.Length];
+            for (int i = 0; i < pbgra.Length; i += 4)
+            {
+                byte a = pbgra[i + 3];
+                if (a == 0) { bgra[i] = bgra[i + 1] = bgra[i + 2] = 0; bgra[i + 3] = 0; continue; }
+                bgra[i + 0] = (byte)Math.Min(255, (pbgra[i + 0] * 255 + (a >> 1)) / a); // B
+                bgra[i + 1] = (byte)Math.Min(255, (pbgra[i + 1] * 255 + (a >> 1)) / a); // G
+                bgra[i + 2] = (byte)Math.Min(255, (pbgra[i + 2] * 255 + (a >> 1)) / a); // R
+                bgra[i + 3] = a;
+            }
+
+            // Blend into Mat at (left, top)
+            int imgW = _img.Doc.Width, imgH = _img.Doc.Height;
+            int step = (int)_img.Doc.Image.Step();
+            var dst = new byte[step * imgH];
+            Marshal.Copy(_img.Doc.Image.Data, dst, 0, dst.Length);
+
+            int left = (int)Math.Round(InkCanvas.GetLeft(_textBorder));
+            int top  = (int)Math.Round(InkCanvas.GetTop(_textBorder));
+
+            for (int y = 0; y < h; y++)
+            {
+                int iy = top + y; if (iy < 0 || iy >= imgH) continue;
+                int dstRow = iy * step;
+                int srcRow = y * stride;
+                for (int x = 0; x < w; x++)
+                {
+                    int ix = left + x; if (ix < 0 || ix >= imgW) continue;
+
+                    int si = srcRow + x * 4;
+                    byte a = bgra[si + 3];
+                    if (a == 0) continue;
+
+                    int di = dstRow + ix * 4;
+
+                    // Alpha blend: out = dst*(1-a) + src*a
+                    int invA = 255 - a;
+                    dst[di + 0] = (byte)((dst[di + 0] * invA + bgra[si + 0] * a) / 255);
+                    dst[di + 1] = (byte)((dst[di + 1] * invA + bgra[si + 1] * a) / 255);
+                    dst[di + 2] = (byte)((dst[di + 2] * invA + bgra[si + 2] * a) / 255);
+                    dst[di + 3] = 255;
+                }
+            }
+
+            Marshal.Copy(dst, 0, _img.Doc.Image.Data, dst.Length);
+            _img.ForceRefreshView();
+
+            StatusText.Content = "Text committed.";
+            Text_Disarm();
+        }
+
+        private void Text_Disarm()
+        {
+            _textToolArmed = false;
+            _textPhase = TextPhase.None;
+
+            if (_textDragRect != null) { PaintCanvas.Children.Remove(_textDragRect); _textDragRect = null; }
+            if (_textBorder   != null) { PaintCanvas.Children.Remove(_textBorder);   _textBorder   = null; }
+            foreach (var h in _textHandles) PaintCanvas.Children.Remove(h);
+            _textHandles.Clear();
+            _textEditor = null;
+
+            _isMoving = _isResizing = false; _resizeCorner = "";
+            PaintCanvas.ReleaseMouseCapture();
+
+            PaintCanvas.Cursor = Cursors.None;
+            UpdateBrushPreviewVisibility(true);
+        }
+
+        // ---------- Filters ----------
+        private void Filter_Gaussian_Click(object sender, RoutedEventArgs e)
+        {
+            if (!EnsureImageOpen()) return;
+
+            try
+            {
+                var src = _img!.Doc!.Image; // BGRA
+                using var dst = new Mat();
+                Cv2.GaussianBlur(src, dst, new CvSize(5, 5), 0);
+                dst.CopyTo(src);
+                _img.ForceRefreshView();
+                StatusText.Content = "Gaussian blur (5×5) applied.";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Gaussian filter failed: " + ex.Message);
+            }
+        }
+
+        private void Filter_Sobel_Click(object sender, RoutedEventArgs e)
+        {
+            if (!EnsureImageOpen()) return;
+
+            try
+            {
+                var src = _img!.Doc!.Image; // BGRA
+                using var gray = new Mat();
+                Cv2.CvtColor(src, gray, ColorConversionCodes.BGRA2GRAY);
+
+                using var gx16 = new Mat();
+                using var gy16 = new Mat();
+                Cv2.Sobel(gray, gx16, MatType.CV_16S, 1, 0, ksize: 3);
+                Cv2.Sobel(gray, gy16, MatType.CV_16S, 0, 1, ksize: 3);
+
+                using var absX = new Mat();
+                using var absY = new Mat();
+                Cv2.ConvertScaleAbs(gx16, absX);
+                Cv2.ConvertScaleAbs(gy16, absY);
+
+                using var mag = new Mat();
+                Cv2.AddWeighted(absX, 0.5, absY, 0.5, 0, mag);
+
+                using var edgesBGRA = new Mat();
+                Cv2.CvtColor(mag, edgesBGRA, ColorConversionCodes.GRAY2BGRA);
+                edgesBGRA.CopyTo(src);
+
+                _img.ForceRefreshView();
+                StatusText.Content = "Sobel edge magnitude applied.";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Sobel filter failed: " + ex.Message);
+            }
+        }
+
+        private void Filter_Binary_Click(object sender, RoutedEventArgs e)
+        {
+            if (!EnsureImageOpen()) return;
+
+            string t = Interaction.InputBox("Binary threshold (0–255):", "Threshold", "128");
+            if (!int.TryParse(t, out int thresh)) thresh = 128;
+            if (thresh < 0) thresh = 0; if (thresh > 255) thresh = 255;
+
+            try
+            {
+                var src = _img!.Doc!.Image; // BGRA
+                using var gray = new Mat();
+                Cv2.CvtColor(src, gray, ColorConversionCodes.BGRA2GRAY);
+
+                using var bin = new Mat();
+                Cv2.Threshold(gray, bin, thresh, 255, ThresholdTypes.Binary);
+
+                using var bgra = new Mat();
+                Cv2.CvtColor(bin, bgra, ColorConversionCodes.GRAY2BGRA);
+                bgra.CopyTo(src);
+
+                _img.ForceRefreshView();
+                StatusText.Content = $"Binary threshold applied (t={thresh}).";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Binary threshold failed: " + ex.Message);
+            }
+        }
+
+        private void Filter_HistogramThreshold_Click(object sender, RoutedEventArgs e)
+        {
+            if (!EnsureImageOpen()) return;
+
+            try
+            {
+                var src = _img!.Doc!.Image; // BGRA
+                using var gray = new Mat();
+                Cv2.CvtColor(src, gray, ColorConversionCodes.BGRA2GRAY);
+
+                using var bin = new Mat();
+                double used = Cv2.Threshold(gray, bin, 0, 255, ThresholdTypes.Binary | ThresholdTypes.Otsu);
+
+                using var bgra = new Mat();
+                Cv2.CvtColor(bin, bgra, ColorConversionCodes.GRAY2BGRA);
+                bgra.CopyTo(src);
+
+                _img.ForceRefreshView();
+                StatusText.Content = $"Histogram thresholding (Otsu) applied (t≈{(int)used}).";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Histogram thresholding failed: " + ex.Message);
+            }
+        }
 
         private void Colors_BrushSize_Click(object sender, RoutedEventArgs e)
         {
             _brushIndex = (_brushIndex + 1) % _brushSizes.Length;
             _eraseMode = false;
+            Text_Disarm();
+            PaintCanvas.Cursor = Cursors.None;
+            UpdateBrushPreviewVisibility(true);
             ApplyInkBrushAttributes();
         }
     }
