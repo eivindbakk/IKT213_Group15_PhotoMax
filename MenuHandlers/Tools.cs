@@ -53,7 +53,7 @@ namespace PhotoMax
         private bool _isResizing = false;
         private string _resizeCorner = "";         // "NW","NE","SW","SE"
 
-        // ----------------- ZOOM -----------------
+        // ----------------- ZOOM (menu handlers) -----------------
         private void Zoom_In_Click(object sender, RoutedEventArgs e)
         {
             double next = _zoom * ZoomStep;
@@ -67,6 +67,18 @@ namespace PhotoMax
                 var p = ViewportPointToWorkspaceBeforeZoom(m);
                 SetZoomToCursor(next, m, p);
             }
+        }
+        
+        private void Tool_MoveTool_Click(object sender, RoutedEventArgs e)
+        {
+            // Switch to Move tool while keeping selection sticky
+            _eraseMode = false;
+            Text_Disarm();                     // exit text tool if active
+            UpdateBrushPreviewVisibility(false);
+            PaintCanvas.Cursor = Cursors.SizeAll;
+
+            _img?.BeginMoveSelectedArea();     // start moving the current selection if there is one
+            StatusText.Content = "Move tool: drag the selected area; press Enter to bake. Switch back to Brush to paint inside.";
         }
 
         private void Zoom_Out_Click(object sender, RoutedEventArgs e)
@@ -106,7 +118,7 @@ namespace PhotoMax
             if (_img != null && _img.Doc != null)
                 imgMin = System.Math.Max(1, System.Math.Min(_img.Doc.Width, _img.Doc.Height));
 
-            int baseSize = _brushSizes[_brushIndex];
+            int baseSize = _brushSizes[_brushIndex]; // <- from MainWindow.xaml.cs
             int minPx   = imgMin > 0 ? System.Math.Max(1, imgMin / 24) : 1;
             int eff     = System.Math.Max(baseSize, minPx);
             return System.Math.Clamp(eff, 1, 256);
@@ -124,6 +136,18 @@ namespace PhotoMax
             return (cx, cy);
         }
 
+        // === Selection-aware helpers for painting ===
+        private bool HasSelectionClip()
+            => _img != null && _img.SelectionFill != null;
+
+        // Tools.cs
+        private bool PixelIsInsideSelection(int x, int y)
+        {
+            // Falls back to true if no selection or _img not ready
+            return _img?.PixelFullyInsideSelection(x, y) ?? true;
+        }
+
+
         internal void ApplyInkBrushAttributes()
         {
             // In brush mode we hide system cursor and draw our own outline
@@ -136,7 +160,7 @@ namespace PhotoMax
             da.FitToCurve = false;
             da.StylusTip = StylusTip.Rectangle;
             da.StylusTipTransform = Matrix.Identity;
-            da.Color = _brushColor;
+            da.Color = _brushColor;           // <- from MainWindow.xaml.cs
             da.Width = 1;
             da.Height = 1;
 
@@ -153,7 +177,7 @@ namespace PhotoMax
             SyncBrushPreviewColor();
 
             int eff = ComputeEffectiveBrushSizePx();
-            StatusText.Content = _eraseMode
+            StatusText.Content = _eraseMode   // <- from MainWindow.xaml.cs
                 ? $"Eraser ON • Size: {eff}px"
                 : $"Brush • Color: #{_brushColor.R:X2}{_brushColor.G:X2}{_brushColor.B:X2} • Size: {eff}px";
         }
@@ -357,7 +381,7 @@ namespace PhotoMax
             }
         }
 
-        // Fill eff×eff block centered at (cx,cy) into overlay buffer
+        // Replace the whole method with this version
         private void FillSquareIntoOverlay(int cx, int cy, int eff, Color color)
         {
             if (_liveWB == null || _liveBuf == null) return;
@@ -367,17 +391,22 @@ namespace PhotoMax
             int left = cx - half;
             int top  = cy - half;
             if (left < 0) left = 0;
-            if (top  < 0) top  = 0;
-            int right  = System.Math.Min(w, left + eff);
-            int bottom = System.Math.Min(h, top  + eff);
+            if (top  < 0)  top = 0;
+            int right  = Math.Min(w, left + eff);
+            int bottom = Math.Min(h, top + eff);
             if (right <= left || bottom <= top) return;
 
+            bool hasSel = HasSelectionClip();
             byte B = color.B, G = color.G, R = color.R;
+
+            // Paint ONLY inside the selection (or everywhere if no selection).
             for (int y = top; y < bottom; y++)
             {
                 int row = y * w * 4;
                 for (int x = left; x < right; x++)
                 {
+                    if (hasSel && !PixelIsInsideSelection(x, y)) continue;
+
                     int i = row + x * 4;
                     _liveBuf[i + 0] = B;
                     _liveBuf[i + 1] = G;
@@ -422,7 +451,7 @@ namespace PhotoMax
 
             Marshal.Copy(dst, 0, _img.Doc.Image.Data, dst.Length);
             _img.ForceRefreshView();
-            _hasUnsavedChanges = true;
+            _hasUnsavedChanges = true; // from MainWindow.xaml.cs (private, same partial class)
         }
 
         // ----------------- Brush preview (zoom-aware, snapped) -----------------
@@ -539,6 +568,16 @@ namespace PhotoMax
             fe.Width  = w;
             fe.Height = h;
         }
+
+        // ----------------- Tools menu extras for selection -----------------
+        private void Tool_MoveSelection_Click(object sender, RoutedEventArgs e)
+            => _img?.BeginMoveSelectedArea();
+
+        private void Tool_PaintInsideSelection_Click(object sender, RoutedEventArgs e)
+            => _img?.EnableSelectionPaintMode();
+
+        private void Tool_CopySelection_Click(object sender, RoutedEventArgs e)
+            => _img?.CopySelectionToClipboard();
 
         // ----------------- Menu actions -----------------
         private void Tool_Erase_Click(object sender, RoutedEventArgs e)
@@ -1071,7 +1110,7 @@ namespace PhotoMax
 
         private void Colors_BrushSize_Click(object sender, RoutedEventArgs e)
         {
-            _brushIndex = (_brushIndex + 1) % _brushSizes.Length;
+            _brushIndex = (_brushIndex + 1) % _brushSizes.Length; // <- from MainWindow.xaml.cs
             _eraseMode = false;
             Text_Disarm();
             PaintCanvas.Cursor = Cursors.None;
