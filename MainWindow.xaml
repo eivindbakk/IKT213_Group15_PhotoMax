@@ -48,10 +48,13 @@
                     <MenuItem Header="Zoom _100%" Click="Zoom_100_Click"/>
                     <MenuItem Header="Zoom to _Fit" Click="Zoom_Fit_Click"/>
                 </MenuItem>
+
+                <!-- Brush/Ink tools are handled in Tools.cs -->
                 <MenuItem Header="_Erase (toggle)" Click="Tool_Erase_Click"/>
                 <MenuItem Header="Color _Picker" Click="Tool_ColorPicker_Click"/>
                 <MenuItem Header="_Paint Brushes (enable)" Click="Tool_Brushes_Click"/>
                 <MenuItem Header="_Text Box" Click="Tool_TextBox_Click"/>
+
                 <MenuItem Header="_Filters">
                     <MenuItem Header="Gaussian" Click="Filter_Gaussian_Click"/>
                     <MenuItem Header="Sobel" Click="Filter_Sobel_Click"/>
@@ -107,10 +110,7 @@
                       PreviewKeyDown="Scroller_PreviewKeyDown"
                       PreviewKeyUp="Scroller_PreviewKeyUp">
 
-            <Grid x:Name="Root"
-                  MinWidth="{Binding ElementName=Scroller, Path=ActualWidth}"
-                  MinHeight="{Binding ElementName=Scroller, Path=ActualHeight}">
-
+            <Grid x:Name="Root">
                 <Border x:Name="Workbench" Background="#1E1E1E" Padding="0">
 
                     <Grid x:Name="Workspace"
