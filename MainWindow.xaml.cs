@@ -37,6 +37,10 @@ namespace PhotoMax
         // Image features controller (defined in MenuHandlers/Image.cs)
         private ImageController? _img;
 
+        // Current file
+        private string? _currentFilePath = null;
+        private bool _hasUnsavedChanges = false;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -58,6 +62,10 @@ namespace PhotoMax
                 SetZoom(1.0, new Point(Scroller.ActualWidth / 2, Scroller.ActualHeight / 2));
                 StatusText.Content = "Ctrl+Wheel: zoom • Space/Middle: pan";
             };
+
+            // Track changes when drawing/editing
+            PaintCanvas.StrokeCollected += (_, __) => _hasUnsavedChanges = true;
+            PaintCanvas.StrokeErased += (_, __) => _hasUnsavedChanges = true;
         }
 
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
