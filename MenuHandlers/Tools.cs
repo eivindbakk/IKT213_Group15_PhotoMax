@@ -422,6 +422,7 @@ namespace PhotoMax
 
             Marshal.Copy(dst, 0, _img.Doc.Image.Data, dst.Length);
             _img.ForceRefreshView();
+            _hasUnsavedChanges = true;
         }
 
         // ----------------- Brush preview (zoom-aware, snapped) -----------------
@@ -930,6 +931,7 @@ namespace PhotoMax
             _img.ForceRefreshView();
 
             StatusText.Content = "Text committed.";
+            _hasUnsavedChanges = true;
             Text_Disarm();
         }
 
@@ -964,6 +966,7 @@ namespace PhotoMax
                 dst.CopyTo(src);
                 _img.ForceRefreshView();
                 StatusText.Content = "Gaussian blur (5×5) applied.";
+                _hasUnsavedChanges = true;
             }
             catch (Exception ex)
             {
@@ -1000,6 +1003,7 @@ namespace PhotoMax
 
                 _img.ForceRefreshView();
                 StatusText.Content = "Sobel edge magnitude applied.";
+                _hasUnsavedChanges = true;
             }
             catch (Exception ex)
             {
@@ -1030,6 +1034,7 @@ namespace PhotoMax
 
                 _img.ForceRefreshView();
                 StatusText.Content = $"Binary threshold applied (t={thresh}).";
+                _hasUnsavedChanges = true;
             }
             catch (Exception ex)
             {
@@ -1056,6 +1061,7 @@ namespace PhotoMax
 
                 _img.ForceRefreshView();
                 StatusText.Content = $"Histogram thresholding (Otsu) applied (t≈{(int)used}).";
+                _hasUnsavedChanges = true;
             }
             catch (Exception ex)
             {

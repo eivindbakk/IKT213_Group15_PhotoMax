@@ -47,14 +47,26 @@ namespace PhotoMax
 
         private void ResetCanvas()
         {
-            // Clear the image
-            ImageView.Source = null;
-            
-            // Clear all ink strokes
-            PaintCanvas.Strokes.Clear();
-            
-            // Optional: Reset to default size (1280x720)
-            SetArtboardSize(1280, 720);
+			// Reset underlying document to a blank 1280x720 BGRA image and refresh view
+			try
+			{
+				if (_img != null)
+				{
+					using var blank = new OpenCvSharp.Mat(new OpenCvSharp.Size(1280, 720), OpenCvSharp.MatType.CV_8UC4, new OpenCvSharp.Scalar(255, 255, 255, 255));
+					_img.Doc.ReplaceWith(blank.Clone());
+					_img.ForceRefreshView();
+				}
+				else
+				{
+					ImageView.Source = null;
+					SetArtboardSize(1280, 720);
+				}
+			}
+			finally
+			{
+				// Clear all ink strokes
+				PaintCanvas.Strokes.Clear();
+			}
         }
 
         private void File_Open_Click(object sender, RoutedEventArgs e)
@@ -85,37 +97,64 @@ namespace PhotoMax
                 Title = "Open Image"
             };
             
-            if (dlg.ShowDialog() == true)
+			if (dlg.ShowDialog() == true)
             {
                 try
                 {
-                    // Load image using OpenCvSharp
-                    using (Mat mat = Cv2.ImRead(dlg.FileName, ImreadModes.Unchanged))
-                    {
-                        if (mat.Empty())
-                        {
-                            MessageBox.Show("Failed to load image.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                            return;
-                        }
+					// Load image using OpenCvSharp and ensure BGRA format for the document
+					using (Mat src = Cv2.ImRead(dlg.FileName, ImreadModes.Unchanged))
+					{
+						if (src.Empty())
+						{
+							MessageBox.Show("Failed to load image.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+							return;
+						}
 
-                        // Convert to BitmapSource for WPF display
-                        BitmapSource bitmapSource = mat.ToBitmapSource();
-                        
-                        // Clear existing strokes
-                        PaintCanvas.Strokes.Clear();
-                        
-                        // Set the image
-                        ImageView.Source = bitmapSource;
-                        
-                        // Resize artboard to match image dimensions
-                        SetArtboardSize(mat.Width, mat.Height);
-                        
-                        // Update tracking
-                        _currentFilePath = dlg.FileName;
-                        _hasUnsavedChanges = false;
-                        
-                        StatusText.Content = $"Opened: {Path.GetFileName(dlg.FileName)} ({mat.Width}x{mat.Height})";
-                    }
+						Mat bgra;
+						if (src.Channels() == 1)
+						{
+							bgra = new Mat();
+							Cv2.CvtColor(src, bgra, ColorConversionCodes.GRAY2BGRA);
+						}
+						else if (src.Channels() == 3)
+						{
+							bgra = new Mat();
+							Cv2.CvtColor(src, bgra, ColorConversionCodes.BGR2BGRA);
+						}
+						else if (src.Channels() == 4)
+						{
+							bgra = src.Clone();
+						}
+						else
+						{
+							MessageBox.Show($"Unsupported image with {src.Channels()} channels.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+							return;
+						}
+
+						using (bgra)
+						{
+							// Clear existing strokes
+							PaintCanvas.Strokes.Clear();
+
+							// Update centralized document so all tools/filters operate on the same image
+							if (_img != null)
+							{
+								_img.Doc.ReplaceWith(bgra.Clone());
+								_img.ForceRefreshView();
+							}
+							else
+							{
+								// Fallback for safety
+								ImageView.Source = bgra.ToBitmapSource();
+								SetArtboardSize(bgra.Width, bgra.Height);
+							}
+
+							// Update tracking
+							_currentFilePath = dlg.FileName;
+							_hasUnsavedChanges = false;
+							StatusText.Content = $"Opened: {Path.GetFileName(dlg.FileName)} ({bgra.Width}x{bgra.Height})";
+						}
+					}
                 }
                 catch (Exception ex)
                 {
