@@ -51,6 +51,7 @@
 
                 <!-- Brush/Ink tools are handled in Tools.cs -->
                 <MenuItem Header="_Erase (toggle)" Click="Tool_Erase_Click"/>
+                <MenuItem Header="_Move Tool (cursor)" Click="Tool_MoveTool_Click"/>
                 <MenuItem Header="Color _Picker" Click="Tool_ColorPicker_Click"/>
                 <MenuItem Header="_Paint Brushes (enable)" Click="Tool_Brushes_Click"/>
                 <MenuItem Header="_Text Box" Click="Tool_TextBox_Click"/>
