@@ -183,6 +183,41 @@ namespace PhotoMax
         private readonly InkCanvas _paint; // baked into Image on ops
 
         public ImageDoc Doc { get; } = new ImageDoc();
+        // --- LAYERS integration ---
+        private readonly LayerStack _layers = new LayerStack();
+
+        // Active bitmap target for all pixel-writing tools (Brush/Shapes/Text/Paste)
+        public OpenCvSharp.Mat Mat => _layers.ActiveMat;
+
+        // Lightweight layer API for MainWindow menu
+        public System.Collections.Generic.List<string> Layers_AllNames => _layers.Layers.ConvertAll(l => l.Name);
+        public string Layers_ActiveName => _layers.Active.Name;
+
+        public void Layers_AddBlank() { EnsureLayers(); _layers.AddBlank(); RefreshView(); }
+        public void Layers_AddFromFile(string path)
+        {
+            EnsureLayers();
+            using var src = OpenCvSharp.Cv2.ImRead(path, OpenCvSharp.ImreadModes.Unchanged);
+            _layers.AddFromMat(src, System.IO.Path.GetFileName(path));
+            RefreshView();
+        }
+        public void Layers_SetSingleFromMat(OpenCvSharp.Mat src)
+        {
+            if (src is null || src.Empty()) return;
+            _layers.SetSingleFromMat(src, "Background");
+            RefreshView();
+        }
+        public void Layers_Select(int idx) { if (_layers.Layers.Count == 0) return; _layers.Select(idx); RefreshView(); }
+        public void Layers_DeleteActive() { if (_layers.Layers.Count <= 1) return; _layers.DeleteActive(); RefreshView(); }
+        public void Layers_RenameActive(string name) { if (_layers.Layers.Count == 0) return; _layers.RenameActive(name); RefreshView(); }
+        public void Layers_ToggleActiveVisibility() { if (_layers.Layers.Count == 0) return; _layers.ToggleActiveVisibility(); RefreshView(); }
+
+        private void EnsureLayers()
+        {
+            if (_layers.Layers.Count == 0)
+                _layers.SetSingleFromMat(Doc.Image.Clone(), "Background");
+        }
+
 
         // Notify host (MainWindow) when the underlying bitmap changed (so it can update brush policy).
         public event Action? ImageChanged;
@@ -254,6 +289,7 @@ namespace PhotoMax
             HookFloatingPasteEvents();
             HookFloatingKeys();
             HookClipboardKeys();   // Ctrl+C / X / V
+            EnsureLayers();
             RefreshView();
         }
 
@@ -298,7 +334,7 @@ namespace PhotoMax
         public void RotateRight90()
         {
             BakeStrokesToImage();
-            Doc.RotateRight90();
+            _layers.RotateRight90();
             EndSelectionMode();
             RefreshView();
         }
@@ -306,7 +342,7 @@ namespace PhotoMax
         public void RotateLeft90()
         {
             BakeStrokesToImage();
-            Doc.RotateLeft90();
+            _layers.RotateLeft90();
             EndSelectionMode();
             RefreshView();
         }
@@ -314,7 +350,7 @@ namespace PhotoMax
         public void FlipVertical()
         {
             BakeStrokesToImage();
-            Doc.FlipVertical();
+            _layers.FlipVertical();
             EndSelectionMode();
             RefreshView();
         }
@@ -322,7 +358,7 @@ namespace PhotoMax
         public void FlipHorizontal()
         {
             BakeStrokesToImage();
-            Doc.FlipHorizontal();
+            _layers.FlipHorizontal();
             EndSelectionMode();
             RefreshView();
         }
@@ -349,7 +385,7 @@ namespace PhotoMax
                 else
                     mode = InterpolationFlags.Linear;
 
-                Doc.ResizeTo(newW, newH, mode);
+                _layers.ResizeTo(newW, newH, mode);
 
                 EndSelectionMode();
                 RefreshView();
@@ -361,6 +397,8 @@ namespace PhotoMax
 
         private void RefreshView()
         {
+            EnsureLayers();
+            Doc.ReplaceWith(_layers.Composite());
             _imageView.Source = Doc.ToBitmapSource();
 
             // Make both bitmap and vector overlay honor pixel boundaries.
@@ -578,7 +616,7 @@ namespace PhotoMax
             rtb.CopyPixels(src, srcStride, 0); // Pbgra32 (premultiplied)
 
             // 2) Copy Doc.Image bytes to managed buffer (may have padding via Step)
-            int dstStep = (int)Doc.Image.Step();
+            int dstStep = (int)Mat.Step();
             var dst = new byte[dstStep * h];
             Marshal.Copy(Doc.Image.Data, dst, 0, dst.Length); // BGRA non-premultiplied
 
@@ -1011,7 +1049,7 @@ namespace PhotoMax
                 return;
             }
 
-            Doc.Crop(
+            _layers.Crop(
                 (int)Math.Floor(r.X),
                 (int)Math.Floor(r.Y),
                 (int)Math.Round(r.Width),
@@ -1421,9 +1459,9 @@ namespace PhotoMax
             if (maxW <= 0 || maxH <= 0) return;
 
             int srcStep = (int)src.Step();
-            int dstStep = (int)Doc.Image.Step();
+            int dstStep = (int)Mat.Step();
             var dstData = new byte[dstStep * dstH];
-            Marshal.Copy(Doc.Image.Data, dstData, 0, dstData.Length);
+            Marshal.Copy(Mat.Data, dstData, 0, dstData.Length);
 
             var srcData = new byte[srcStep * src.Height];
             Marshal.Copy(src.Data, srcData, 0, srcData.Length);
@@ -1453,7 +1491,7 @@ namespace PhotoMax
                 }
             }
 
-            Marshal.Copy(dstData, 0, Doc.Image.Data, dstData.Length);
+            Marshal.Copy(dstData, 0, Mat.Data, dstData.Length);
         }
     }
 

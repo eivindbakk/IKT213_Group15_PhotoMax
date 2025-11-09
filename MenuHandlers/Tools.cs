@@ -394,19 +394,24 @@ namespace PhotoMax
             _liveWB.WritePixels(new Int32Rect(0, 0, w, h), _liveBuf, w * 4, 0);
         }
 
+        // In MenuHandlers/Tools.cs, inside partial class MainWindow
         private void CommitOverlayToImage()
         {
-            if (_img == null || _img.Doc == null || _liveWB == null || _liveBuf == null) return;
+            if (_img == null || _liveWB == null || _liveBuf == null) return;
 
             int w = _liveWB.PixelWidth, h = _liveWB.PixelHeight;
-            int step = (int)_img.Doc.Image.Step(); // OpenCV row stride
+
+            var mat = _img.Mat; // <-- commit to ACTIVE LAYER
+            if (mat == null || mat.Empty()) return;
+
+            int step = (int)mat.Step();
             var dst = new byte[step * h];
-            Marshal.Copy(_img.Doc.Image.Data, dst, 0, dst.Length);
+            System.Runtime.InteropServices.Marshal.Copy(mat.Data, dst, 0, dst.Length);
 
             for (int y = 0; y < h; y++)
             {
-                int rb = y * w * 4;  // overlay row base
-                int rd = y * step;   // doc row base
+                int rb = y * w * 4;   // buffer row
+                int rd = y * step;    // mat row
                 for (int x = 0; x < w; x++)
                 {
                     int i = rb + x * 4;
@@ -420,10 +425,11 @@ namespace PhotoMax
                 }
             }
 
-            Marshal.Copy(dst, 0, _img.Doc.Image.Data, dst.Length);
+            System.Runtime.InteropServices.Marshal.Copy(dst, 0, mat.Data, dst.Length);
             _img.ForceRefreshView();
             _hasUnsavedChanges = true;
         }
+
 
         // ----------------- Brush preview (zoom-aware, snapped) -----------------
         private void EnsureBrushPreview()
