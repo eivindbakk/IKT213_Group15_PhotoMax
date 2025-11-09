@@ -7,18 +7,23 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using OpenCvSharp;
 
 namespace PhotoMax
 {
     public partial class MainWindow
     {
-        // ===== Canvas filter session state =====
-        private Image? _filterOverlay;           // preview/result bitmap layer
-        private Border? _filterToolbar;          // small control panel
-        private WriteableBitmap? _filterWB;      // destination bitmap
-        private byte[]? _filterSrc;              // canvas snapshot (Pbgra32)
-        private byte[]? _filterDst;              // working buffer
+        // ===== Layer-specific filter session (live preview + apply in-place) =====
+        private Image? _filterOverlay;           // preview bitmap (Pbgra32) drawn under PaintCanvas
+        private Border? _filterToolbar;          // tiny control panel
+        private WriteableBitmap? _filterWB;      // preview surface (Pbgra32)
+        private byte[]? _filterSrc;              // source snapshot (Pbgra32) — from ACTIVE LAYER
+        private byte[]? _filterDst;              // working buffer (Pbgra32)
         private int _fw, _fh, _fstride;
+
+        // backup of the ACTIVE layer (BGRA straight) so we can hide/restore during preview
+        private byte[]? _activeBackup;
+        private int _activeW, _activeH, _activeStride;
 
         private string _filterMode = "Grayscale"; // Grayscale | Invert | Sepia | Posterize | Pixelate
         private double _filterAmount = 1.0;       // 0..1
@@ -26,8 +31,7 @@ namespace PhotoMax
         private int _pixelBlock = 8;              // 2..40
         private bool _filterActive = false;
 
-        // Smoothing: throttle preview while dragging sliders
-        private DispatcherTimer? _filterTimer;
+        private DispatcherTimer? _filterTimer;    // throttled live preview (~30 fps)
         private bool _filterDirty;
 
         // UI refs
@@ -36,7 +40,14 @@ namespace PhotoMax
         private Slider? _lvlSlider;
         private Slider? _blkSlider;
 
-        // Entry from menu: Fun → Filters
+        // === Public helper so Tools/Layers can safely tear down a running preview ===
+        internal void Filters_CancelIfActive()
+        {
+            if (_filterActive)
+                EndLayerFilterSession(apply: false);
+        }
+
+        // ===== Entry from menu: Fun → Filters =====
         private void Fun_Filters_Click(object sender, RoutedEventArgs e)
         {
             if (_filterActive)
@@ -54,38 +65,46 @@ namespace PhotoMax
                 return;
             }
 
-            StartCanvasFilterSession(board);
+            StartLayerFilterSession(board);
         }
 
         // ---- session lifecycle -------------------------------------------------
 
-        private void StartCanvasFilterSession(Canvas board)
+        private void StartLayerFilterSession(Canvas board)
         {
-            (_filterSrc, _fw, _fh, _fstride) = SnapshotCanvas(board);
-            if (_filterSrc == null || _filterSrc.Length == 0 || _fw == 0 || _fh == 0)
-                return;
+            // 1) Snapshot ACTIVE LAYER (BGRA straight) and keep a backup
+            (var srcBGRA, _activeW, _activeH, _activeStride) = SnapshotActiveLayer();
+            if (srcBGRA.Length == 0 || _activeW == 0 || _activeH == 0) return;
+            _activeBackup = srcBGRA; // keep original to restore on cancel
 
-            _filterDst = new byte[_filterSrc.Length];
+            // 2) Build PBGRA source for preview filters
+            _fw = _activeW; _fh = _activeH; _fstride = _fw * 4;
+            _filterSrc = new byte[_fstride * _fh];
+            _filterDst = new byte[_fstride * _fh];
+            BGRA_to_PBGRA(srcBGRA, _fw, _fh, _activeStride, _filterSrc);
+
+            // 3) Hide the ACTIVE layer underneath so we don't see "double image" during preview
+            HideActiveLayerPixels();       // hide by zeroing RGBA
+            _img?.ForceRefreshView();
+
+            // 4) Create overlay for live preview (shows only the processed result)
             _filterWB  = new WriteableBitmap(_fw, _fh, 96, 96, PixelFormats.Pbgra32, null);
-
-            // overlay for live preview (and final result after Apply)
             _filterOverlay = new Image
             {
                 Source = _filterWB,
-                IsHitTestVisible = false // never block interactions
+                IsHitTestVisible = false,
+                Opacity = 1.0
             };
-
-            // Place the overlay BELOW interaction layers (InkCanvas / PaintCanvas)
             AddOverlayUnderInteractionLayer(board, _filterOverlay);
 
-            // toolbar UI (topmost while editing)
+            // 5) Toolbar
             _filterToolbar = BuildFilterToolbar(board);
             Canvas.SetLeft(_filterToolbar, 8);
             Canvas.SetTop(_filterToolbar, 8);
             Panel.SetZIndex(_filterToolbar, int.MaxValue);
             board.Children.Add(_filterToolbar);
 
-            // start throttle timer (~30 fps). It only renders when _filterDirty is true.
+            // 6) Throttle timer (~30 fps). Renders only when _filterDirty is true.
             _filterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
             _filterTimer.Tick += (_, __) =>
             {
@@ -104,7 +123,7 @@ namespace PhotoMax
             ApplyFilterAndUpdate();
         }
 
-        private void EndCanvasFilterSession(bool keepOverlay)
+        private void EndLayerFilterSession(bool apply)
         {
             var board = GetArtboardOrNull();
             if (board == null) return;
@@ -112,15 +131,25 @@ namespace PhotoMax
             _filterTimer?.Stop();
             _filterTimer = null;
 
-            if (!keepOverlay && _filterOverlay != null)
-                board.Children.Remove(_filterOverlay);
+            if (apply)
+            {
+                // Write the current preview (_filterDst PBGRA) INTO the active layer (BGRA straight)
+                ApplyPreviewBufferToActiveLayer();
+                _img?.ForceRefreshView();
+                _hasUnsavedChanges = true;
+                StatusText.Content = $"Applied {_filterMode} to active layer.";
+            }
+            else
+            {
+                // Restore original active layer pixels
+                if (_activeBackup != null) RestoreActiveLayerPixels(_activeBackup, _activeW, _activeH, _activeStride);
+                _img?.ForceRefreshView();
+                StatusText.Content = "Filter canceled.";
+            }
 
-            if (_filterToolbar != null)
-                board.Children.Remove(_filterToolbar);
-
-            // If we keep the overlay, ensure it remains under interaction layers
-            if (keepOverlay && _filterOverlay != null)
-                AddOverlayUnderInteractionLayer(board, _filterOverlay);
+            // Remove overlay + toolbar
+            if (_filterOverlay != null) board.Children.Remove(_filterOverlay);
+            if (_filterToolbar != null) board.Children.Remove(_filterToolbar);
 
             _filterOverlay = null;
             _filterToolbar = null;
@@ -134,6 +163,8 @@ namespace PhotoMax
             _filterActive = false;
             _filterDirty = false;
 
+            // Make sure active layer is visible again (either modified or restored)
+            if (_activeBackup != null) { _activeBackup = null; }
             this.PreviewKeyDown -= OnFilter_PreviewKeyDown;
         }
 
@@ -142,13 +173,12 @@ namespace PhotoMax
             if (!_filterActive) return;
             if (e.Key == Key.Enter)
             {
-                // keep overlay as a static bitmap layer (still under InkCanvas)
-                EndCanvasFilterSession(keepOverlay: true);
+                EndLayerFilterSession(apply: true);
                 e.Handled = true;
             }
             else if (e.Key == Key.Escape)
             {
-                EndCanvasFilterSession(keepOverlay: false);
+                EndLayerFilterSession(apply: false);
                 e.Handled = true;
             }
         }
@@ -170,7 +200,7 @@ namespace PhotoMax
 
             var title = new TextBlock
             {
-                Text = "Canvas Filter",
+                Text = "Layer Filter (live)",
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Brushes.White,
                 Margin = new Thickness(0, 0, 0, 6)
@@ -188,14 +218,14 @@ namespace PhotoMax
             {
                 _filterMode = (string)_modeCombo.SelectedItem!;
                 UpdateExtrasVisibility();
-                _filterDirty = true; // defer heavy work to timer
+                _filterDirty = true;
             };
             stack.Children.Add(_modeCombo);
 
             _amtSlider = MakeLabeledSlider(stack, "Amount", 0, 1, _filterAmount, 0.01, v =>
             {
                 _filterAmount = v;
-                _filterDirty = true; // throttle updates for smooth dragging
+                _filterDirty = true;
             });
 
             _lvlSlider = MakeLabeledSlider(stack, "Levels", 2, 8, _posterizeLevels, 1, v =>
@@ -214,10 +244,9 @@ namespace PhotoMax
 
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
             var apply = new Button { Content = "Apply (Enter)", Margin = new Thickness(0, 0, 6, 0), Padding = new Thickness(10, 4, 10, 4) };
-            apply.Click += (s, e) => EndCanvasFilterSession(keepOverlay: true);
-
+            apply.Click += (s, e) => EndLayerFilterSession(apply: true);
             var cancel = new Button { Content = "Cancel (Esc)", Padding = new Thickness(10, 4, 10, 4) };
-            cancel.Click += (s, e) => EndCanvasFilterSession(keepOverlay: false);
+            cancel.Click += (s, e) => EndLayerFilterSession(apply: false);
 
             row.Children.Add(apply);
             row.Children.Add(cancel);
@@ -243,9 +272,8 @@ namespace PhotoMax
                     Maximum = max,
                     Value = val,
                     TickFrequency = step,
-                    // Smoothness helpers:
-                    IsSnapToTickEnabled = false, // free movement
-                    IsMoveToPointEnabled = true, // click to set directly
+                    IsSnapToTickEnabled = false,
+                    IsMoveToPointEnabled = true,
                     SmallChange = step,
                     LargeChange = Math.Max(step * 10, 0.1),
                     Width = 220
@@ -272,68 +300,103 @@ namespace PhotoMax
 
             switch (_filterMode)
             {
-                case "Invert":     Filter_Invert();     break;
-                case "Sepia":      Filter_Sepia();      break;
-                case "Posterize":  Filter_Posterize();  break;
-                case "Pixelate":   Filter_Pixelate();   break;
-                default:           Filter_Grayscale();  break;
+                case "Invert":     Filter_Invert_PremulSafe();   break;
+                case "Sepia":      Filter_Sepia_PremulSafe();     break;
+                case "Posterize":  Filter_Posterize_PremulSafe(); break;
+                case "Pixelate":   Filter_Pixelate();             break; // premul-safe
+                default:           Filter_Grayscale_PremulSafe(); break;
             }
 
             var rect = new Int32Rect(0, 0, _fw, _fh);
             _filterWB.WritePixels(rect, _filterDst, _fstride, 0);
         }
 
-        private void Filter_Grayscale()
+        // === Filters that respect premultiplied alpha ==================================
+
+        private void Filter_Grayscale_PremulSafe()
         {
             var amt = _filterAmount;
             var src = _filterSrc!;
             var dst = _filterDst!;
             for (int i = 0; i < src.Length; i += 4)
             {
-                byte b = src[i + 0], g = src[i + 1], r = src[i + 2], a = src[i + 3];
-                byte y = (byte)Math.Clamp((int)Math.Round(0.114 * b + 0.587 * g + 0.299 * r), 0, 255);
-                dst[i + 0] = LerpByte(b, y, amt);
-                dst[i + 1] = LerpByte(g, y, amt);
-                dst[i + 2] = LerpByte(r, y, amt);
+                byte bp = src[i + 0], gp = src[i + 1], rp = src[i + 2], a = src[i + 3];
+                if (a == 0) { dst[i + 0] = dst[i + 1] = dst[i + 2] = 0; dst[i + 3] = 0; continue; }
+
+                // un-premultiply
+                int b = (bp * 255 + (a >> 1)) / a;
+                int g = (gp * 255 + (a >> 1)) / a;
+                int r = (rp * 255 + (a >> 1)) / a;
+
+                int y = (int)Math.Round(0.114 * b + 0.587 * g + 0.299 * r);
+                y = Math.Clamp(y, 0, 255);
+
+                // lerp in straight space, then re-premultiply
+                int lb = (int)Math.Round(b + (y - b) * amt);
+                int lg = (int)Math.Round(g + (y - g) * amt);
+                int lr = (int)Math.Round(r + (y - r) * amt);
+
+                dst[i + 0] = (byte)((lb * a + 127) / 255);
+                dst[i + 1] = (byte)((lg * a + 127) / 255);
+                dst[i + 2] = (byte)((lr * a + 127) / 255);
                 dst[i + 3] = a;
             }
         }
 
-        private void Filter_Invert()
+        private void Filter_Invert_PremulSafe()
         {
             var amt = _filterAmount;
             var src = _filterSrc!;
             var dst = _filterDst!;
             for (int i = 0; i < src.Length; i += 4)
             {
-                byte b = src[i + 0], g = src[i + 1], r = src[i + 2], a = src[i + 3];
-                dst[i + 0] = LerpByte(b, (byte)(255 - b), amt);
-                dst[i + 1] = LerpByte(g, (byte)(255 - g), amt);
-                dst[i + 2] = LerpByte(r, (byte)(255 - r), amt);
+                byte bp = src[i + 0], gp = src[i + 1], rp = src[i + 2], a = src[i + 3];
+                if (a == 0) { dst[i + 0] = dst[i + 1] = dst[i + 2] = 0; dst[i + 3] = 0; continue; }
+
+                // In premultiplied space, perfect invert is: c' = a - c
+                byte tb = (byte)(a - bp);
+                byte tg = (byte)(a - gp);
+                byte tr = (byte)(a - rp);
+
+                dst[i + 0] = LerpByte(bp, tb, amt);
+                dst[i + 1] = LerpByte(gp, tg, amt);
+                dst[i + 2] = LerpByte(rp, tr, amt);
                 dst[i + 3] = a;
             }
         }
 
-        private void Filter_Sepia()
+        private void Filter_Sepia_PremulSafe()
         {
             var amt = _filterAmount;
             var src = _filterSrc!;
             var dst = _filterDst!;
             for (int i = 0; i < src.Length; i += 4)
             {
-                byte b = src[i + 0], g = src[i + 1], r = src[i + 2], a = src[i + 3];
-                byte y = (byte)Math.Clamp((int)Math.Round(0.114 * b + 0.587 * g + 0.299 * r), 0, 255);
+                byte bp = src[i + 0], gp = src[i + 1], rp = src[i + 2], a = src[i + 3];
+                if (a == 0) { dst[i + 0] = dst[i + 1] = dst[i + 2] = 0; dst[i + 3] = 0; continue; }
+
+                // un-premultiply
+                int b = (bp * 255 + (a >> 1)) / a;
+                int g = (gp * 255 + (a >> 1)) / a;
+                int r = (rp * 255 + (a >> 1)) / a;
+
+                int y = (int)Math.Round(0.114 * b + 0.587 * g + 0.299 * r);
                 int sr = Math.Min(255, (int)(y * 1.07));
                 int sg = Math.Min(255, (int)(y * 0.87));
                 int sb = Math.Min(255, (int)(y * 0.55));
-                dst[i + 0] = LerpByte(b, (byte)sb, amt);
-                dst[i + 1] = LerpByte(g, (byte)sg, amt);
-                dst[i + 2] = LerpByte(r, (byte)sr, amt);
+
+                int lr = (int)Math.Round(r + (sr - r) * amt);
+                int lg = (int)Math.Round(g + (sg - g) * amt);
+                int lb = (int)Math.Round(b + (sb - b) * amt);
+
+                dst[i + 0] = (byte)((lb * a + 127) / 255);
+                dst[i + 1] = (byte)((lg * a + 127) / 255);
+                dst[i + 2] = (byte)((lr * a + 127) / 255);
                 dst[i + 3] = a;
             }
         }
 
-        private void Filter_Posterize()
+        private void Filter_Posterize_PremulSafe()
         {
             var amt = _filterAmount;
             int levels = Math.Max(2, Math.Min(8, _posterizeLevels));
@@ -343,28 +406,39 @@ namespace PhotoMax
             var dst = _filterDst!;
             for (int i = 0; i < src.Length; i += 4)
             {
-                byte b = src[i + 0], g = src[i + 1], r = src[i + 2], a = src[i + 3];
+                byte bp = src[i + 0], gp = src[i + 1], rp = src[i + 2], a = src[i + 3];
+                if (a == 0) { dst[i + 0] = dst[i + 1] = dst[i + 2] = 0; dst[i + 3] = 0; continue; }
 
-                // Quantize each channel to the nearest "step"
+                int b = (bp * 255 + (a >> 1)) / a;
+                int g = (gp * 255 + (a >> 1)) / a;
+                int r = (rp * 255 + (a >> 1)) / a;
+
                 byte qb = (byte)Math.Clamp((int)Math.Round(Math.Round(b / step) * step), 0, 255);
                 byte qg = (byte)Math.Clamp((int)Math.Round(Math.Round(g / step) * step), 0, 255);
                 byte qr = (byte)Math.Clamp((int)Math.Round(Math.Round(r / step) * step), 0, 255);
 
-                dst[i + 0] = LerpByte(b, qb, amt);
-                dst[i + 1] = LerpByte(g, qg, amt);
-                dst[i + 2] = LerpByte(r, qr, amt);
+                int lb = (int)Math.Round(b + (qb - b) * amt);
+                int lg = (int)Math.Round(g + (qg - g) * amt);
+                int lr = (int)Math.Round(r + (qr - r) * amt);
+
+                dst[i + 0] = (byte)((lb * a + 127) / 255);
+                dst[i + 1] = (byte)((lg * a + 127) / 255);
+                dst[i + 2] = (byte)((lr * a + 127) / 255);
                 dst[i + 3] = a;
             }
         }
 
+        // === PIXELATE — uses your center-sample algorithm (premul-safe, amount-aware) ===
         private void Filter_Pixelate()
         {
             var amt = _filterAmount;
             int block = Math.Max(2, Math.Min(40, _pixelBlock));
 
-            var src = _filterSrc!;
+            var src = _filterSrc!;   // PBGRA
             var dst = _filterDst!;
-            Array.Copy(src, dst, src.Length);
+            Array.Copy(src, dst, src.Length); // start from src
+
+            bool hard = amt >= 0.999;
 
             for (int y = 0; y < _fh; y += block)
             {
@@ -379,6 +453,7 @@ namespace PhotoMax
                     byte sb = src[cidx + 0];
                     byte sg = src[cidx + 1];
                     byte sr = src[cidx + 2];
+                    byte sa = src[cidx + 3];
 
                     for (int yy = 0; yy < bh; yy++)
                     {
@@ -386,11 +461,20 @@ namespace PhotoMax
                         for (int xx = 0; xx < bw; xx++)
                         {
                             int i = row + xx * 4;
-                            byte ob = dst[i + 0], og = dst[i + 1], orr = dst[i + 2];
-                            dst[i + 0] = LerpByte(ob, sb, amt);
-                            dst[i + 1] = LerpByte(og, sg, amt);
-                            dst[i + 2] = LerpByte(orr, sr, amt);
-                            // alpha unchanged
+                            if (hard)
+                            {
+                                dst[i + 0] = sb;
+                                dst[i + 1] = sg;
+                                dst[i + 2] = sr;
+                                dst[i + 3] = sa;
+                            }
+                            else
+                            {
+                                dst[i + 0] = LerpByte(dst[i + 0], sb, amt);
+                                dst[i + 1] = LerpByte(dst[i + 1], sg, amt);
+                                dst[i + 2] = LerpByte(dst[i + 2], sr, amt);
+                                dst[i + 3] = LerpByte(dst[i + 3], sa, amt);
+                            }
                         }
                     }
                 }
@@ -404,50 +488,122 @@ namespace PhotoMax
             return (byte)v;
         }
 
+        private static int GetLuma(int b, int g, int r) => (int)Math.Round(0.114 * b + 0.587 * g + 0.299 * r);
+
         // ---- helpers -----------------------------------------------------------
 
-        private (byte[] buf, int w, int h, int stride) SnapshotCanvas(Canvas board)
+        // Snapshot ACTIVE LAYER (BGRA straight, tightly packed)
+        private (byte[] buf, int w, int h, int stride) SnapshotActiveLayer()
         {
-            int w = (int)Math.Ceiling(board.ActualWidth);
-            int h = (int)Math.Ceiling(board.ActualHeight);
-            if (w <= 0 || h <= 0) return (Array.Empty<byte>(), 0, 0, 0);
+            if (_img?.Mat == null || _img.Mat.Empty())
+                return (Array.Empty<byte>(), 0, 0, 0);
 
-            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-            rtb.Render(board);
-
+            int w = _img.Mat.Cols;
+            int h = _img.Mat.Rows;
             int stride = w * 4;
             var buf = new byte[h * stride];
-            rtb.CopyPixels(buf, stride, 0);
+
+            int step = (int)_img.Mat.Step();
+            var row = new byte[step];
+            for (int y = 0; y < h; y++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(_img.Mat.Data + y * step, row, 0, step);
+                Buffer.BlockCopy(row, 0, buf, y * stride, stride); // drop padding, keep tight
+            }
             return (buf, w, h, stride);
         }
 
+        // TEMP: hide active layer (zero RGBA) while preview runs
+        private void HideActiveLayerPixels()
+        {
+            if (_img?.Mat == null || _img.Mat.Empty()) return;
+            _img.Mat.SetTo(new Scalar(0, 0, 0, 0)); // safer than manual Marshal.Copy
+        }
+
+        private void RestoreActiveLayerPixels(byte[] srcBGRA, int w, int h, int stride)
+        {
+            if (_img?.Mat == null || _img.Mat.Empty()) return;
+            int step = (int)_img.Mat.Step();
+            var row = new byte[step];
+            for (int y = 0; y < h; y++)
+            {
+                Buffer.BlockCopy(srcBGRA, y * stride, row, 0, stride);
+                System.Runtime.InteropServices.Marshal.Copy(row, 0, _img.Mat.Data + y * step, step);
+            }
+        }
+
+        // Apply current preview buffer (PBGRA) into active layer (BGRA straight)
+        private void ApplyPreviewBufferToActiveLayer()
+        {
+            if (_filterDst == null || _img?.Mat == null || _img.Mat.Empty()) return;
+            int w = _fw, h = _fh;
+            int stride = w * 4;
+
+            // Convert PBGRA -> BGRA
+            var bgra = new byte[_filterDst.Length];
+            PBGRA_to_BGRA(_filterDst, w, h, stride, bgra);
+
+            // Copy into Mat row by row (including padding)
+            int step = (int)_img.Mat.Step();
+            var row = new byte[step];
+            for (int y = 0; y < h; y++)
+            {
+                Buffer.BlockCopy(bgra, y * stride, row, 0, stride);
+                System.Runtime.InteropServices.Marshal.Copy(row, 0, _img.Mat.Data + y * step, step);
+            }
+        }
+
+        private static void BGRA_to_PBGRA(byte[] bgra, int w, int h, int stride, byte[] pbgraOut)
+        {
+            int len = stride * h;
+            for (int i = 0; i < len; i += 4)
+            {
+                byte B = bgra[i + 0], G = bgra[i + 1], R = bgra[i + 2], A = bgra[i + 3];
+                pbgraOut[i + 3] = A;
+                if (A == 0) { pbgraOut[i + 0] = 0; pbgraOut[i + 1] = 0; pbgraOut[i + 2] = 0; continue; }
+                pbgraOut[i + 0] = (byte)((B * A + 127) / 255);
+                pbgraOut[i + 1] = (byte)((G * A + 127) / 255);
+                pbgraOut[i + 2] = (byte)((R * A + 127) / 255);
+            }
+        }
+
+        private static void PBGRA_to_BGRA(byte[] pbgra, int w, int h, int stride, byte[] bgraOut)
+        {
+            int len = stride * h;
+            for (int i = 0; i < len; i += 4)
+            {
+                byte Bp = pbgra[i + 0], Gp = pbgra[i + 1], Rp = pbgra[i + 2], A = pbgra[i + 3];
+                bgraOut[i + 3] = A;
+                if (A == 0) { bgraOut[i + 0] = 0; bgraOut[i + 1] = 0; bgraOut[i + 2] = 0; continue; }
+                bgraOut[i + 0] = (byte)Math.Min(255, (Bp * 255 + (A >> 1)) / A);
+                bgraOut[i + 1] = (byte)Math.Min(255, (Gp * 255 + (A >> 1)) / A);
+                bgraOut[i + 2] = (byte)Math.Min(255, (Rp * 255 + (A >> 1)) / A);
+            }
+        }
+
+        // ---- canvas helpers ----------------------------------------------------
+
         private Canvas? GetArtboardOrNull()
         {
-            // 1) XAML name lookup
             var byName = this.FindName("Artboard") as Canvas;
             if (byName != null) return byName;
 
-            // 2) Search by name in visual tree
             var namedArtboard = FindDescendantByName<Canvas>(this, "Artboard");
             if (namedArtboard != null) return namedArtboard;
 
-            // 3) If there’s an InkCanvas (often named PaintCanvas), use its parent Canvas
             var ink = (this.FindName("PaintCanvas") as InkCanvas) ?? FindDescendant<InkCanvas>(this);
             if (ink?.Parent is Canvas parentCanvas) return parentCanvas;
 
-            // 4) Fallback: first Canvas anywhere under the Window
             return FindDescendant<Canvas>(this);
         }
 
         // Insert overlay just below interaction layers (InkCanvas / element named "PaintCanvas")
         private static void AddOverlayUnderInteractionLayer(Canvas board, UIElement overlay)
         {
-            // If overlay is already inside some panel, remove it first
             var oldParent = VisualTreeHelper.GetParent(overlay) as Panel;
             if (oldParent != null)
                 oldParent.Children.Remove(overlay);
 
-            // Find the first "interaction layer"
             int interactionIndex = -1;
             for (int i = 0; i < board.Children.Count; i++)
             {
@@ -458,17 +614,16 @@ namespace PhotoMax
 
             if (interactionIndex >= 0)
             {
-                // Insert just before the interaction layer and set Z below it
                 var neighbor = board.Children[interactionIndex];
                 int neighborZ = Panel.GetZIndex(neighbor);
                 board.Children.Insert(interactionIndex, overlay);
-                Panel.SetZIndex(overlay, neighborZ - 1);
+                // SAME ZIndex as InkCanvas so overlay sits just underneath it
+                Panel.SetZIndex(overlay, neighborZ);
             }
             else
             {
-                // No explicit interaction layer; add far back
                 board.Children.Add(overlay);
-                Panel.SetZIndex(overlay, -100);
+                Panel.SetZIndex(overlay, 1);
             }
         }
 

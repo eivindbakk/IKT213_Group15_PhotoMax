@@ -435,7 +435,7 @@ namespace PhotoMax
 
             int step = (int)mat.Step();
             var dst = new byte[step * h];
-            System.Runtime.InteropServices.Marshal.Copy(mat.Data, dst, 0, dst.Length);
+            Marshal.Copy(mat.Data, dst, 0, dst.Length);
 
             for (int y = 0; y < h; y++)
             {
@@ -454,7 +454,7 @@ namespace PhotoMax
                 }
             }
 
-            System.Runtime.InteropServices.Marshal.Copy(dst, 0, mat.Data, dst.Length);
+            Marshal.Copy(dst, 0, mat.Data, dst.Length);
             _img.ForceRefreshView();
             _hasUnsavedChanges = true; // from MainWindow.xaml.cs (private, same partial class)
         }
@@ -998,120 +998,268 @@ namespace PhotoMax
             UpdateBrushPreviewVisibility(true);
         }
 
-        // ---------- Filters ----------
-        private void Filter_Gaussian_Click(object sender, RoutedEventArgs e)
+        // ===================== Layer‑specific filter PREVIEW (Gaussian/Sobel/Binary/Otsu) =====================
+        private bool _lpRunning = false;
+        private string _lpMode = "";
+        private Image? _lpOverlay;
+        private Border? _lpToolbar;
+        private Slider? _lpBinarySlider;
+        private Mat? _lpSrc;                 // clone of the active layer before preview
+        private Mat? _lpWork;                // last preview result
+        private byte[]? _lpBackupBytes;      // original bytes of the active layer
+        private WriteableBitmap? _lpWB;      // preview writeable bitmap
+        private int _lpW, _lpH, _lpStride;
+
+        private void StartLayerPreview(string mode)
         {
-            if (!EnsureImageOpen()) return;
+            if (_img?.Mat == null || _img.Mat.Empty()) return;
+            EndLayerPreview(apply:false);  // safety
+
+            _lpMode = mode;
+            _lpRunning = true;
+
+            _lpSrc = _img.Mat.Clone();
+            _lpW = _lpSrc.Width;
+            _lpH = _lpSrc.Height;
+            _lpStride = (int)_img.Mat.Step();
+
+            // Backup current layer and hide it under the preview
+            _lpBackupBytes = new byte[_lpStride * _lpH];
+            Marshal.Copy(_img.Mat.Data, _lpBackupBytes, 0, _lpBackupBytes.Length);
+            _img.Mat.SetTo(new Scalar(0, 0, 0, 0));
+            _img.ForceRefreshView();
+
+            // Preview overlay
+            _lpWB = new WriteableBitmap(_lpW, _lpH, 96, 96, PixelFormats.Bgra32, null);
+            _lpOverlay = new Image { Source = _lpWB, IsHitTestVisible = false, Width = _lpW, Height = _lpH };
+            RenderOptions.SetBitmapScalingMode(_lpOverlay, BitmapScalingMode.NearestNeighbor);
+            InkCanvas.SetLeft(_lpOverlay, 0);
+            InkCanvas.SetTop(_lpOverlay, 0);
+            Panel.SetZIndex(_lpOverlay, 1001);
+            Artboard.Children.Add(_lpOverlay);
+
+            _lpToolbar = BuildLayerToolbar();
+            Canvas.SetLeft(_lpToolbar, 8);
+            Canvas.SetTop(_lpToolbar, 8);
+            Panel.SetZIndex(_lpToolbar, int.MaxValue);
+            Artboard.Children.Add(_lpToolbar);
+
+            UpdateLayerPreview();
+            this.PreviewKeyDown += OnLayerPreviewKeyDown;
+            StatusText.Content = $"Preview: {mode}. Enter = Apply, Esc = Cancel.";
+        }
+
+        private void OnLayerPreviewKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (!_lpRunning) return;
+            if (e.Key == Key.Enter) { EndLayerPreview(apply:true); e.Handled = true; }
+            else if (e.Key == Key.Escape) { EndLayerPreview(apply:false); e.Handled = true; }
+        }
+
+        private Border BuildLayerToolbar()
+        {
+            var border = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(180, 25, 25, 25)),
+                BorderBrush = Brushes.DimGray,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(8)
+            };
+            var stack = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(2) };
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"Layer Filter: {_lpMode}",
+                Foreground = Brushes.White,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0,0,0,6)
+            });
+
+            if (_lpMode == "Binary")
+            {
+                var lbl = new TextBlock { Text = "Threshold", Foreground = Brushes.Gainsboro };
+                _lpBinarySlider = new Slider
+                {
+                    Minimum = 0, Maximum = 255, Value = 128,
+                    Width = 220, IsSnapToTickEnabled = false, IsMoveToPointEnabled = true,
+                    SmallChange = 1, LargeChange = 16
+                };
+                _lpBinarySlider.ValueChanged += (_, __) => UpdateLayerPreview();
+                stack.Children.Add(lbl);
+                stack.Children.Add(_lpBinarySlider);
+            }
+
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0,6,0,0) };
+            var apply = new Button { Content = "Apply (Enter)", Margin = new Thickness(0,0,6,0), Padding = new Thickness(10,4,10,4) };
+            var cancel = new Button { Content = "Cancel (Esc)", Padding = new Thickness(10,4,10,4) };
+            apply.Click += (_, __) => EndLayerPreview(apply:true);
+            cancel.Click += (_, __) => EndLayerPreview(apply:false);
+            row.Children.Add(apply); row.Children.Add(cancel);
+            stack.Children.Add(row);
+
+            border.Child = stack;
+            return border;
+        }
+
+        private void UpdateLayerPreview()
+        {
+            if (_lpSrc == null || _lpWB == null) return;
+
+            _lpWork?.Dispose();
+            _lpWork = _lpSrc.Clone();
+
+            // Keep original alpha separate to avoid haloing
+            using var alpha = new Mat();
+            Cv2.ExtractChannel(_lpSrc, alpha, 3);
+
+            switch (_lpMode)
+            {
+                case "Gaussian":
+                    Cv2.GaussianBlur(_lpSrc, _lpWork, new CvSize(5,5), 0);
+                    // restore alpha
+                    Cv2.InsertChannel(alpha, _lpWork, 3);
+                    break;
+
+                case "Sobel":
+                    using (var gray = new Mat())
+                    using (var gx = new Mat())
+                    using (var gy = new Mat())
+                    using (var agx = new Mat())
+                    using (var agy = new Mat())
+                    using (var mag = new Mat())
+                    using (var bgr = new Mat())
+                    {
+                        Cv2.CvtColor(_lpSrc, gray, ColorConversionCodes.BGRA2GRAY);
+                        Cv2.Sobel(gray, gx, MatType.CV_16S, 1, 0, ksize:3, scale:1, delta:0, BorderTypes.Default);
+                        Cv2.Sobel(gray, gy, MatType.CV_16S, 0, 1, ksize:3, scale:1, delta:0, BorderTypes.Default);
+                        Cv2.ConvertScaleAbs(gx, agx);
+                        Cv2.ConvertScaleAbs(gy, agy);
+                        Cv2.AddWeighted(agx, 0.5, agy, 0.5, 0, mag);
+                        Cv2.CvtColor(mag, bgr, ColorConversionCodes.GRAY2BGR);
+                        Cv2.Merge(new[] { bgr.Split()[0], bgr.Split()[1], bgr.Split()[2], alpha }, _lpWork);
+                    }
+                    break;
+
+                case "Binary":
+                    using (var gray = new Mat())
+                    using (var bw = new Mat())
+                    using (var bgr = new Mat())
+                    {
+                        Cv2.CvtColor(_lpSrc, gray, ColorConversionCodes.BGRA2GRAY);
+                        double t = _lpBinarySlider?.Value ?? 128;
+                        Cv2.Threshold(gray, bw, t, 255, ThresholdTypes.Binary);
+                        Cv2.CvtColor(bw, bgr, ColorConversionCodes.GRAY2BGR);
+                        Cv2.Merge(new[] { bgr.Split()[0], bgr.Split()[1], bgr.Split()[2], alpha }, _lpWork);
+                    }
+                    break;
+
+                case "Otsu":
+                    using (var gray = new Mat())
+                    using (var bw = new Mat())
+                    using (var bgr = new Mat())
+                    {
+                        Cv2.CvtColor(_lpSrc, gray, ColorConversionCodes.BGRA2GRAY);
+                        Cv2.Threshold(gray, bw, 0, 255, ThresholdTypes.Binary | ThresholdTypes.Otsu);
+                        Cv2.CvtColor(bw, bgr, ColorConversionCodes.GRAY2BGR);
+                        Cv2.Merge(new[] { bgr.Split()[0], bgr.Split()[1], bgr.Split()[2], alpha }, _lpWork);
+                    }
+                    break;
+            }
+
+            // Push _lpWork into the WriteableBitmap
+            int srcStep = (int)_lpWork.Step();
+            int dstStride = _lpW * 4;
+            var srcBytes = new byte[srcStep * _lpH];
+            Marshal.Copy(_lpWork.Data, srcBytes, 0, srcBytes.Length);
+            var dstBytes = new byte[dstStride * _lpH];
+            for (int y = 0; y < _lpH; y++)
+            {
+                Buffer.BlockCopy(srcBytes, y * srcStep, dstBytes, y * dstStride, dstStride);
+            }
+            _lpWB.WritePixels(new Int32Rect(0, 0, _lpW, _lpH), dstBytes, dstStride, 0);
+        }
+
+        private void EndLayerPreview(bool apply)
+        {
+            if (!_lpRunning) return;
+            _lpRunning = false;
+            this.PreviewKeyDown -= OnLayerPreviewKeyDown;
 
             try
             {
-                var src = _img!.Doc!.Image; // BGRA
-                using var dst = new Mat();
-                Cv2.GaussianBlur(src, dst, new CvSize(5, 5), 0);
-                dst.CopyTo(src);
-                _img.ForceRefreshView();
-                StatusText.Content = "Gaussian blur (5×5) applied.";
-                _hasUnsavedChanges = true;
+                if (_img?.Mat != null && !_img.Mat.Empty())
+                {
+                    if (apply && _lpWork != null)
+                    {
+                        // Commit preview result into the active layer
+                        int step = (int)_img.Mat.Step();
+                        int srcStep = (int)_lpWork.Step();
+                        int h = _lpH;
+                        int w = _lpW;
+
+                        var srcBytes = new byte[srcStep * h];
+                        Marshal.Copy(_lpWork.Data, srcBytes, 0, srcBytes.Length);
+
+                        var dstBytes = new byte[step * h];
+                        Marshal.Copy(_img.Mat.Data, dstBytes, 0, dstBytes.Length);
+
+                        int rowBytes = w * 4;
+                        for (int y = 0; y < h; y++)
+                        {
+                            Buffer.BlockCopy(srcBytes, y * srcStep, dstBytes, y * step, rowBytes);
+                            // ensure alpha fully opaque where source alpha is >0
+                            // (already handled by keeping alpha channel from _lpSrc)
+                        }
+                        Marshal.Copy(dstBytes, 0, _img.Mat.Data, dstBytes.Length);
+                        _img.ForceRefreshView();
+                        _hasUnsavedChanges = true;
+                    }
+                    else if (_lpBackupBytes != null)
+                    {
+                        // Restore original layer bytes
+                        Marshal.Copy(_lpBackupBytes, 0, _img.Mat.Data, _lpBackupBytes.Length);
+                        _img.ForceRefreshView();
+                    }
+                }
             }
-            catch (Exception ex)
+            finally
             {
-                MessageBox.Show("Gaussian filter failed: " + ex.Message);
+                // Tear down overlay + UI
+                if (_lpOverlay != null) Artboard.Children.Remove(_lpOverlay);
+                if (_lpToolbar != null) Artboard.Children.Remove(_lpToolbar);
+                _lpOverlay = null; _lpToolbar = null;
+                _lpWB = null;
+
+                _lpWork?.Dispose(); _lpWork = null;
+                _lpSrc?.Dispose();  _lpSrc = null;
+                _lpBackupBytes = null;
+                StatusText.Content = "";
             }
+        }
+
+        // ---------- Filters: hook up to XAML (Gaussian/Sobel/Binary/Otsu) ----------
+        private void Filter_Gaussian_Click(object sender, RoutedEventArgs e)
+        {
+            if (!EnsureImageOpen()) return;
+            StartLayerPreview("Gaussian");
         }
 
         private void Filter_Sobel_Click(object sender, RoutedEventArgs e)
         {
             if (!EnsureImageOpen()) return;
-
-            try
-            {
-                var src = _img!.Doc!.Image; // BGRA
-                using var gray = new Mat();
-                Cv2.CvtColor(src, gray, ColorConversionCodes.BGRA2GRAY);
-
-                using var gx16 = new Mat();
-                using var gy16 = new Mat();
-                Cv2.Sobel(gray, gx16, MatType.CV_16S, 1, 0, ksize: 3);
-                Cv2.Sobel(gray, gy16, MatType.CV_16S, 0, 1, ksize: 3);
-
-                using var absX = new Mat();
-                using var absY = new Mat();
-                Cv2.ConvertScaleAbs(gx16, absX);
-                Cv2.ConvertScaleAbs(gy16, absY);
-
-                using var mag = new Mat();
-                Cv2.AddWeighted(absX, 0.5, absY, 0.5, 0, mag);
-
-                using var edgesBGRA = new Mat();
-                Cv2.CvtColor(mag, edgesBGRA, ColorConversionCodes.GRAY2BGRA);
-                edgesBGRA.CopyTo(src);
-
-                _img.ForceRefreshView();
-                StatusText.Content = "Sobel edge magnitude applied.";
-                _hasUnsavedChanges = true;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Sobel filter failed: " + ex.Message);
-            }
+            StartLayerPreview("Sobel");
         }
 
         private void Filter_Binary_Click(object sender, RoutedEventArgs e)
         {
             if (!EnsureImageOpen()) return;
-
-            string t = Interaction.InputBox("Binary threshold (0–255):", "Threshold", "128");
-            if (!int.TryParse(t, out int thresh)) thresh = 128;
-            if (thresh < 0) thresh = 0; if (thresh > 255) thresh = 255;
-
-            try
-            {
-                var src = _img!.Doc!.Image; // BGRA
-                using var gray = new Mat();
-                Cv2.CvtColor(src, gray, ColorConversionCodes.BGRA2GRAY);
-
-                using var bin = new Mat();
-                Cv2.Threshold(gray, bin, thresh, 255, ThresholdTypes.Binary);
-
-                using var bgra = new Mat();
-                Cv2.CvtColor(bin, bgra, ColorConversionCodes.GRAY2BGRA);
-                bgra.CopyTo(src);
-
-                _img.ForceRefreshView();
-                StatusText.Content = $"Binary threshold applied (t={thresh}).";
-                _hasUnsavedChanges = true;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Binary threshold failed: " + ex.Message);
-            }
+            StartLayerPreview("Binary");
         }
 
         private void Filter_HistogramThreshold_Click(object sender, RoutedEventArgs e)
         {
             if (!EnsureImageOpen()) return;
-
-            try
-            {
-                var src = _img!.Doc!.Image; // BGRA
-                using var gray = new Mat();
-                Cv2.CvtColor(src, gray, ColorConversionCodes.BGRA2GRAY);
-
-                using var bin = new Mat();
-                double used = Cv2.Threshold(gray, bin, 0, 255, ThresholdTypes.Binary | ThresholdTypes.Otsu);
-
-                using var bgra = new Mat();
-                Cv2.CvtColor(bin, bgra, ColorConversionCodes.GRAY2BGRA);
-                bgra.CopyTo(src);
-
-                _img.ForceRefreshView();
-                StatusText.Content = $"Histogram thresholding (Otsu) applied (t≈{(int)used}).";
-                _hasUnsavedChanges = true;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Histogram thresholding failed: " + ex.Message);
-            }
+            StartLayerPreview("Otsu");
         }
 
         private void Colors_BrushSize_Click(object sender, RoutedEventArgs e)
