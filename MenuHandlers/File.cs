@@ -53,8 +53,7 @@ namespace PhotoMax
 				if (_img != null)
 				{
 					using var blank = new OpenCvSharp.Mat(new OpenCvSharp.Size(1280, 720), OpenCvSharp.MatType.CV_8UC4, new OpenCvSharp.Scalar(255, 255, 255, 255));
-					_img.Doc.ReplaceWith(blank.Clone());
-					_img.ForceRefreshView();
+					_img.Layers_SetSingleFromMat(blank.Clone());
 				}
 				else
 				{
@@ -139,8 +138,7 @@ namespace PhotoMax
 							// Update centralized document so all tools/filters operate on the same image
 							if (_img != null)
 							{
-								_img.Doc.ReplaceWith(bgra.Clone());
-								_img.ForceRefreshView();
+								_img.Layers_SetSingleFromMat(bgra.Clone());
 							}
 							else
 							{
