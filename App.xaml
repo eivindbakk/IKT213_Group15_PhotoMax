@@ -2,5 +2,251 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
-    <Application.Resources/>
+    <Application.Resources>
+        <ResourceDictionary>
+            <!-- ========== CORE DARK THEME BRUSHES ========== -->
+            <SolidColorBrush x:Key="PmWindowBackgroundBrush" Color="#1E1E1E"/>
+            <SolidColorBrush x:Key="PmPanelBackgroundBrush" Color="#252526"/>
+            <SolidColorBrush x:Key="PmPanelBorderBrush" Color="#3F3F46"/>
+            <SolidColorBrush x:Key="PmAccentBrush" Color="#FF4FC3F7"/>
+            <SolidColorBrush x:Key="PmAccentBrushSoft" Color="#404FC3F7"/>
+            <SolidColorBrush x:Key="PmTextBrush" Color="#F3F3F3"/>
+            <SolidColorBrush x:Key="PmSubTextBrush" Color="#B0B0B0"/>
+            <SolidColorBrush x:Key="PmGlyphBrush" Color="#FFC7C7C7"/>
+
+            <!-- ========== WINDOWS (applies to Edit Layer, Fun Filters, etc.) ========== -->
+            <Style TargetType="Window">
+                <Setter Property="Background" Value="{StaticResource PmWindowBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+            </Style>
+
+            <!-- Let Grids be transparent so the Window background shows through -->
+            <Style TargetType="Grid">
+                <Setter Property="Background" Value="Transparent"/>
+            </Style>
+
+            <!-- Panels in dialogs (GroupBox-style stuff) -->
+            <Style TargetType="GroupBox">
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource PmPanelBorderBrush}"/>
+            </Style>
+
+            <!-- ========== MENUS (top bar + dropdowns + context menus) ========== -->
+
+            <!-- Top menu bar -->
+            <Style TargetType="Menu">
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="BorderThickness" Value="0"/>
+            </Style>
+
+            <!-- Dark MenuItem template; solid popup, no scrollbar -->
+            <Style TargetType="MenuItem">
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Padding" Value="8,4"/>
+                <Setter Property="SnapsToDevicePixels" Value="True"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type MenuItem}">
+                            <Border x:Name="RootBorder"
+                                    Background="{TemplateBinding Background}">
+                                <Grid SnapsToDevicePixels="True">
+                                    <!-- Header row (icon + text) -->
+                                    <DockPanel>
+                                        <ContentPresenter x:Name="Icon"
+                                                          ContentSource="Icon"
+                                                          Margin="4,0,6,0"
+                                                          VerticalAlignment="Center"
+                                                          SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+
+                                        <ContentPresenter x:Name="Header"
+                                                          ContentSource="Header"
+                                                          Margin="{TemplateBinding Padding}"
+                                                          RecognizesAccessKey="True"
+                                                          SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                                    </DockPanel>
+
+                                    <!-- Submenu popup -->
+                                    <Popup x:Name="PART_Popup"
+                                           AllowsTransparency="False"
+                                           Focusable="False"
+                                           IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                           PopupAnimation="{DynamicResource {x:Static SystemParameters.MenuPopupAnimationKey}}"
+                                           Placement="Bottom"
+                                           HorizontalOffset="0"
+                                           VerticalOffset="0">
+                                        <Border Background="{StaticResource PmPanelBackgroundBrush}"
+                                                BorderBrush="{StaticResource PmPanelBorderBrush}"
+                                                BorderThickness="1">
+                                            <!-- Host for submenu items; no ScrollViewer -> no scrollbar -->
+                                            <StackPanel IsItemsHost="True"
+                                                        KeyboardNavigation.DirectionalNavigation="Cycle"
+                                                        KeyboardNavigation.TabNavigation="Cycle"
+                                                        Margin="2"/>
+                                        </Border>
+                                    </Popup>
+                                </Grid>
+                            </Border>
+
+                            <!-- Triggers for hover, open, disabled -->
+                            <ControlTemplate.Triggers>
+                                <!-- hover / highlighted -->
+                                <Trigger Property="IsHighlighted" Value="True">
+                                    <Setter TargetName="RootBorder"
+                                            Property="Background"
+                                            Value="#333337"/>
+                                </Trigger>
+
+                                <!-- keep highlight when submenu open -->
+                                <Trigger Property="IsSubmenuOpen" Value="True">
+                                    <Setter TargetName="RootBorder"
+                                            Property="Background"
+                                            Value="#333337"/>
+                                </Trigger>
+
+                                <!-- disabled -->
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.5"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Context menus (right-click in Fun/Text tools etc.) -->
+            <Style TargetType="ContextMenu">
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+            </Style>
+
+            <!-- Thin separators -->
+            <Style TargetType="Separator">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Separator">
+                            <Border Height="1"
+                                    Margin="4,3,4,3"
+                                    Background="{StaticResource PmPanelBorderBrush}"/>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- ========== LISTS (used in layers dialogs etc.) ========== -->
+            <Style TargetType="ListBox">
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource PmPanelBorderBrush}"/>
+            </Style>
+
+            <Style TargetType="ListBoxItem">
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="Padding" Value="4,2"/>
+                <Setter Property="SnapsToDevicePixels" Value="True"/>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="#333337"/>
+                    </Trigger>
+                    <Trigger Property="IsSelected" Value="True">
+                        <Setter Property="Background" Value="#404FC3F7"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <!-- ========== TABS (if Fun filters uses TabControl) ========== -->
+            <Style TargetType="TabControl">
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource PmPanelBorderBrush}"/>
+            </Style>
+
+            <Style TargetType="TabItem">
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="Padding" Value="8,4"/>
+                <Setter Property="BorderBrush" Value="{StaticResource PmPanelBorderBrush}"/>
+                <Setter Property="BorderThickness" Value="0,0,1,1"/>
+                <Style.Triggers>
+                    <Trigger Property="IsSelected" Value="True">
+                        <Setter Property="Background" Value="#333337"/>
+                        <Setter Property="BorderThickness" Value="1,1,1,0"/>
+                    </Trigger>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="#303038"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <!-- ========== TOOLBAR-LIKE PANELS (Fun filters bar etc.) ========== -->
+            <Style TargetType="ToolBar">
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource PmPanelBorderBrush}"/>
+            </Style>
+
+            <!-- ========== STATUS BAR ========== -->
+            <Style TargetType="StatusBar">
+                <Setter Property="Background" Value="{StaticResource PmPanelBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource PmSubTextBrush}"/>
+                <Setter Property="BorderThickness" Value="0,1,0,0"/>
+                <Setter Property="BorderBrush" Value="{StaticResource PmPanelBorderBrush}"/>
+            </Style>
+
+            <!-- ========== BUTTONS ========== -->
+            <Style TargetType="Button">
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="Background" Value="#333337"/>
+                <Setter Property="BorderBrush" Value="{StaticResource PmPanelBorderBrush}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Padding" Value="6,4"/>
+                <Setter Property="Margin" Value="0,2,0,2"/>
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="SnapsToDevicePixels" Value="True"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Border"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  Margin="{TemplateBinding Padding}"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Border"
+                                            Property="Background"
+                                            Value="#3F3F46"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Border"
+                                            Property="Background"
+                                            Value="{StaticResource PmAccentBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.5"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- ========== TEXT ========== -->
+            <Style TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+            </Style>
+
+            <!-- ========== SCROLLVIEWERS ========== -->
+            <Style TargetType="ScrollViewer">
+                <Setter Property="Background" Value="{StaticResource PmWindowBackgroundBrush}"/>
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
 </Application>
