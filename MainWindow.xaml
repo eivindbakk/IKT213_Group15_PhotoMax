@@ -19,7 +19,7 @@
                 <MenuItem Header="_Quit" Click="File_Quit_Click"/>
             </MenuItem>
 
-            <MenuItem Header="_Clipboard">
+            <MenuItem Header="Cli_pboard">
                 <MenuItem Header="_Copy" Click="Clipboard_Copy_Click"/>
                 <MenuItem Header="_Paste" Click="Clipboard_Paste_Click"/>
                 <MenuItem Header="Cu_t" Click="Clipboard_Cut_Click"/>
@@ -89,7 +89,7 @@
                 <MenuItem Header="Rename Layer" Click="Layers_Rename_Click"/>
             </MenuItem>
 
-            <MenuItem Header="Sna_pchat/Zoom Filters :)" Click="Fun_Filters_Click"/>
+            <MenuItem Header="Filt_ers" Click="Fun_Filters_Click"/>
         </Menu>
 
         <!-- STATUS -->
