@@ -350,6 +350,7 @@ namespace PhotoMax
                 Shapes_ClearActive();
                 _sh_pendingCommit = false;
                 e.Handled = true;
+                if (_sh_active == null) Shapes_Disarm();
             }
             else if (e.Key == Key.R) { _sh_kind = Shapes_Kind.Rectangle; e.Handled = true; }
             else if (e.Key == Key.E) { _sh_kind = Shapes_Kind.Ellipse;   e.Handled = true; }

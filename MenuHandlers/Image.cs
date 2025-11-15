@@ -228,7 +228,6 @@ namespace PhotoMax
                 _layers.SetSingleFromMat(Doc.Image.Clone(), "Background");
         }
 
-
         // Notify host (MainWindow) when the underlying bitmap changed (so it can update brush policy).
         public event Action? ImageChanged;
 
@@ -245,6 +244,67 @@ namespace PhotoMax
         public Geometry? SelectionFill => _selectionClip;
         public Geometry? SelectionEdge => _selectionEdge;
         public bool HasActiveSelection => _selectionClip != null;
+
+        // ===== FAST SELECTION MASK (for lag-free painting) =====
+        private byte[]? _selMask;     // 1 byte per pixel: 255 = inside, 0 = outside
+        private int _selMaskW, _selMaskH;
+        private bool _selMaskDirty = true;
+
+        /// <summary>Call once per stroke (or whenever selection changed) to (re)build the mask.</summary>
+        public void RebuildSelectionMaskIfDirty()
+        {
+            if (!_selMaskDirty) return;
+
+            if (_selectionClip == null)
+            {
+                _selMask = null; _selMaskW = _selMaskH = 0; _selMaskDirty = false;
+                return;
+            }
+
+            int w = Doc.Width, h = Doc.Height;
+            if (w < 1 || h < 1)
+            {
+                _selMask = null; _selMaskW = _selMaskH = 0; _selMaskDirty = false;
+                return;
+            }
+
+            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+            {
+                // Draw selection filled white; antialias will produce gray alpha we will threshold.
+                dc.DrawGeometry(Brushes.White, null, _selectionClip);
+            }
+            rtb.Render(dv);
+
+            int stride = w * 4;
+            var buf = new byte[h * stride];
+            rtb.CopyPixels(buf, stride, 0);
+
+            _selMask = new byte[w * h];
+            int dst = 0;
+            for (int y = 0; y < h; y++)
+            {
+                int row = y * stride;
+                for (int x = 0; x < w; x++)
+                {
+                    byte a = buf[row + x * 4 + 3];
+                    _selMask![dst++] = (a >= 128) ? (byte)255 : (byte)0;
+                }
+            }
+            _selMaskW = w; _selMaskH = h;
+            _selMaskDirty = false;
+        }
+
+        /// <summary>Ultra-fast test: true if pixel is allowed for painting (or no selection at all).</summary>
+        public bool FastMaskInside(int x, int y)
+        {
+            if (_selMask == null) return true;
+            if ((uint)x >= (uint)_selMaskW || (uint)y >= (uint)_selMaskH) return false;
+            return _selMask[y * _selMaskW + x] == 255;
+        }
+
+        private void MarkSelectionDirty() => _selMaskDirty = true;
 
         // rectangle
         private Rectangle? _rectBox;
@@ -494,8 +554,6 @@ namespace PhotoMax
             _status.Content = "Move: drag to reposition, Enter to place (selection stays), Esc to cancel.";
         }
 
-
-
         /// <summary>Finalize (place floating if any) and clear the selection — bound to Enter.</summary>
         private void FinalizeSelection()
         {
@@ -716,6 +774,9 @@ namespace PhotoMax
 
             _paint.Clip = _selectionClip;
 
+            // selection mask will need rebuilding
+            MarkSelectionDirty();
+
             // show visuals but exit selection mode -> back to painting
             _mode = SelMode.None;
             _paint.IsHitTestVisible = true;
@@ -733,6 +794,9 @@ namespace PhotoMax
             _selectionClip = null;
             _selectionEdge = null;
             _paint.Clip = null;
+
+            // selection mask invalidated
+            MarkSelectionDirty();
 
             // keep visuals hidden when deselecting
             if (_rectBox != null) _rectBox.Visibility = Visibility.Collapsed;
@@ -1713,191 +1777,191 @@ namespace PhotoMax
         }
 
         /* ---------------- helpers for sticky selection translation ---------------- */
-// Builds a Pbgra32 mask for the current _selectionClip inside the ROI at (x,y,w,h).
-// Image.cs (inside ImageController)
-private byte[] BuildSelectionMaskBytes_Binary(int x, int y, int w, int h, byte threshold)
-{
-    if (_selectionClip == null) return new byte[w * h * 4];
-
-    var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-    var dv = new DrawingVisual();
-    using (var dc = dv.RenderOpen())
-    {
-        dc.PushTransform(new TranslateTransform(-x, -y));
-        // Fill the selection solid white; antialias may produce gray alpha -> we will binarize.
-        dc.DrawGeometry(Brushes.White, null, _selectionClip);
-        dc.Pop();
-    }
-    rtb.Render(dv);
-
-    int stride = w * 4;
-    var buf = new byte[h * stride];
-    rtb.CopyPixels(buf, stride, 0);
-
-    // HARD threshold alpha so edges are crisp (no soft fringe).
-    for (int i = 0; i < buf.Length; i += 4)
-    {
-        byte a = buf[i + 3];
-        byte bin = (a >= threshold) ? (byte)255 : (byte)0;
-        buf[i + 0] = 0;
-        buf[i + 1] = 0;
-        buf[i + 2] = 0;
-        buf[i + 3] = bin;
-    }
-    return buf;
-}
-
-private void ApplyAlphaMaskToMat_Binary(Mat bgra, byte[] mask, int w, int h)
-{
-    int step = (int)bgra.Step();
-    var data = new byte[step * h];
-    Marshal.Copy(bgra.Data, data, 0, data.Length);
-
-    int mStride = w * 4;
-    for (int y = 0; y < h; y++)
-    {
-        int rowD = y * step;
-        int rowM = y * mStride;
-        for (int x = 0; x < w; x++)
+        // Builds a Pbgra32 mask for the current _selectionClip inside the ROI at (x,y,w,h).
+        // Image.cs (inside ImageController)
+        private byte[] BuildSelectionMaskBytes_Binary(int x, int y, int w, int h, byte threshold)
         {
-            int di = rowD + x * 4;
-            int mi = rowM + x * 4;
-            byte a = mask[mi + 3]; // already 0 or 255
-            data[di + 3] = a;
+            if (_selectionClip == null) return new byte[w * h * 4];
 
-            if (a == 0)
+            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
             {
-                // outside selection: fully transparent in the floating sprite
-                data[di + 0] = 0;
-                data[di + 1] = 0;
-                data[di + 2] = 0;
+                dc.PushTransform(new TranslateTransform(-x, -y));
+                // Fill the selection solid white; antialias may produce gray alpha -> we will binarize.
+                dc.DrawGeometry(Brushes.White, null, _selectionClip);
+                dc.Pop();
             }
-        }
-    }
+            rtb.Render(dv);
 
-    Marshal.Copy(data, 0, bgra.Data, data.Length);
-}
+            int stride = w * 4;
+            var buf = new byte[h * stride];
+            rtb.CopyPixels(buf, stride, 0);
 
-private void ClearDocRegionWithMaskToWhite_Binary(int x, int y, int w, int h, byte[] mask)
-{
-    int step = (int)Doc.Image.Step();
-    var dst = new byte[step * Doc.Height];
-    Marshal.Copy(Doc.Image.Data, dst, 0, dst.Length);
-
-    int mStride = w * 4;
-
-    for (int yy = 0; yy < h; yy++)
-    {
-        int iy = y + yy; if (iy < 0 || iy >= Doc.Height) continue;
-        int rowD = iy * step;
-        int rowM = yy * mStride;
-
-        for (int xx = 0; xx < w; xx++)
-        {
-            int ix = x + xx; if (ix < 0 || ix >= Doc.Width) continue;
-
-            int di = rowD + ix * 4;
-            int mi = rowM + xx * 4;
-            byte a = mask[mi + 3]; // 0 or 255
-
-            if (a == 0) continue; // do not clear outside selection
-
-            dst[di + 0] = 255;
-            dst[di + 1] = 255;
-            dst[di + 2] = 255;
-            dst[di + 3] = 255;
-        }
-    }
-
-    Marshal.Copy(dst, 0, Doc.Image.Data, dst.Length);
-}
-
-private byte[] BuildSelectionMaskBytes(int x, int y, int w, int h)
-{
-    if (_selectionClip == null) return new byte[w * h * 4];
-
-    var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-    var dv = new DrawingVisual();
-    using (var dc = dv.RenderOpen())
-    {
-        // Shift selection geometry into ROI-local coords
-        dc.PushTransform(new TranslateTransform(-x, -y));
-        dc.DrawGeometry(Brushes.White, null, _selectionClip);
-        dc.Pop();
-    }
-    rtb.Render(dv);
-
-    int stride = w * 4;
-    var buf = new byte[h * stride];
-    rtb.CopyPixels(buf, stride, 0);
-    return buf;
-}
-
-// Applies alpha from mask (Pbgra32) to the given Bgra Mat (straight alpha expected).
-private void ApplyAlphaMaskToMat(Mat bgra, byte[] mask, int w, int h)
-{
-    int step = (int)bgra.Step();
-    var data = new byte[step * h];
-    Marshal.Copy(bgra.Data, data, 0, data.Length);
-
-    int mStride = w * 4;
-    for (int y = 0; y < h; y++)
-    {
-        int rowD = y * step;
-        int rowM = y * mStride;
-        for (int x = 0; x < w; x++)
-        {
-            int di = rowD + x * 4;
-            int mi = rowM + x * 4;
-            byte a = mask[mi + 3];
-            data[di + 3] = a;          // set alpha
-            if (a == 0)
+            // HARD threshold alpha so edges are crisp (no soft fringe).
+            for (int i = 0; i < buf.Length; i += 4)
             {
-                // optional: zero color outside selection (keeps the preview tidy)
-                data[di + 0] = 0;
-                data[di + 1] = 0;
-                data[di + 2] = 0;
+                byte a = buf[i + 3];
+                byte bin = (a >= threshold) ? (byte)255 : (byte)0;
+                buf[i + 0] = 0;
+                buf[i + 1] = 0;
+                buf[i + 2] = 0;
+                buf[i + 3] = bin;
             }
+            return buf;
         }
-    }
 
-    Marshal.Copy(data, 0, bgra.Data, data.Length);
-}
-
-// Uses the selection mask to set ONLY the selected pixels in the doc to white (opaque).
-private void ClearDocRegionWithMaskToWhite(int x, int y, int w, int h, byte[] mask)
-{
-    int step = (int)Doc.Image.Step();
-    var dst = new byte[step * Doc.Height];
-    Marshal.Copy(Doc.Image.Data, dst, 0, dst.Length);
-
-    int mStride = w * 4;
-
-    for (int yy = 0; yy < h; yy++)
-    {
-        int iy = y + yy; if (iy < 0 || iy >= Doc.Height) continue;
-        int rowD = iy * step;
-        int rowM = yy * mStride;
-
-        for (int xx = 0; xx < w; xx++)
+        private void ApplyAlphaMaskToMat_Binary(Mat bgra, byte[] mask, int w, int h)
         {
-            int ix = x + xx; if (ix < 0 || ix >= Doc.Width) continue;
+            int step = (int)bgra.Step();
+            var data = new byte[step * h];
+            Marshal.Copy(bgra.Data, data, 0, data.Length);
 
-            int di = rowD + ix * 4;
-            int mi = rowM + xx * 4;
-            byte a = mask[mi + 3];
-            if (a == 0) continue;
+            int mStride = w * 4;
+            for (int y = 0; y < h; y++)
+            {
+                int rowD = y * step;
+                int rowM = y * mStride;
+                for (int x = 0; x < w; x++)
+                {
+                    int di = rowD + x * 4;
+                    int mi = rowM + x * 4;
+                    byte a = mask[mi + 3]; // already 0 or 255
+                    data[di + 3] = a;
 
-            // Clear selected pixel to opaque white
-            dst[di + 0] = 255;
-            dst[di + 1] = 255;
-            dst[di + 2] = 255;
-            dst[di + 3] = 255;
+                    if (a == 0)
+                    {
+                        // outside selection: fully transparent in the floating sprite
+                        data[di + 0] = 0;
+                        data[di + 1] = 0;
+                        data[di + 2] = 0;
+                    }
+                }
+            }
+
+            Marshal.Copy(data, 0, bgra.Data, data.Length);
         }
-    }
 
-    Marshal.Copy(dst, 0, Doc.Image.Data, dst.Length);
-}
+        private void ClearDocRegionWithMaskToWhite_Binary(int x, int y, int w, int h, byte[] mask)
+        {
+            int step = (int)Doc.Image.Step();
+            var dst = new byte[step * Doc.Height];
+            Marshal.Copy(Doc.Image.Data, dst, 0, dst.Length);
+
+            int mStride = w * 4;
+
+            for (int yy = 0; yy < h; yy++)
+            {
+                int iy = y + yy; if (iy < 0 || iy >= Doc.Height) continue;
+                int rowD = iy * step;
+                int rowM = yy * mStride;
+
+                for (int xx = 0; xx < w; xx++)
+                {
+                    int ix = x + xx; if (ix < 0 || ix >= Doc.Width) continue;
+
+                    int di = rowD + ix * 4;
+                    int mi = rowM + xx * 4;
+                    byte a = mask[mi + 3]; // 0 or 255
+
+                    if (a == 0) continue; // do not clear outside selection
+
+                    dst[di + 0] = 255;
+                    dst[di + 1] = 255;
+                    dst[di + 2] = 255;
+                    dst[di + 3] = 255;
+                }
+            }
+
+            Marshal.Copy(dst, 0, Doc.Image.Data, dst.Length);
+        }
+
+        private byte[] BuildSelectionMaskBytes(int x, int y, int w, int h)
+        {
+            if (_selectionClip == null) return new byte[w * h * 4];
+
+            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+            {
+                // Shift selection geometry into ROI-local coords
+                dc.PushTransform(new TranslateTransform(-x, -y));
+                dc.DrawGeometry(Brushes.White, null, _selectionClip);
+                dc.Pop();
+            }
+            rtb.Render(dv);
+
+            int stride = w * 4;
+            var buf = new byte[h * stride];
+            rtb.CopyPixels(buf, stride, 0);
+            return buf;
+        }
+
+        // Applies alpha from mask (Pbgra32) to the given Bgra Mat (straight alpha expected).
+        private void ApplyAlphaMaskToMat(Mat bgra, byte[] mask, int w, int h)
+        {
+            int step = (int)bgra.Step();
+            var data = new byte[step * h];
+            Marshal.Copy(bgra.Data, data, 0, data.Length);
+
+            int mStride = w * 4;
+            for (int y = 0; y < h; y++)
+            {
+                int rowD = y * step;
+                int rowM = y * mStride;
+                for (int x = 0; x < w; x++)
+                {
+                    int di = rowD + x * 4;
+                    int mi = rowM + x * 4;
+                    byte a = mask[mi + 3];
+                    data[di + 3] = a;          // set alpha
+                    if (a == 0)
+                    {
+                        // optional: zero color outside selection (keeps the preview tidy)
+                        data[di + 0] = 0;
+                        data[di + 1] = 0;
+                        data[di + 2] = 0;
+                    }
+                }
+            }
+
+            Marshal.Copy(data, 0, bgra.Data, data.Length);
+        }
+
+        // Uses the selection mask to set ONLY the selected pixels in the doc to white (opaque).
+        private void ClearDocRegionWithMaskToWhite(int x, int y, int w, int h, byte[] mask)
+        {
+            int step = (int)Doc.Image.Step();
+            var dst = new byte[step * Doc.Height];
+            Marshal.Copy(Doc.Image.Data, dst, 0, dst.Length);
+
+            int mStride = w * 4;
+
+            for (int yy = 0; yy < h; yy++)
+            {
+                int iy = y + yy; if (iy < 0 || iy >= Doc.Height) continue;
+                int rowD = iy * step;
+                int rowM = yy * mStride;
+
+                for (int xx = 0; xx < w; xx++)
+                {
+                    int ix = x + xx; if (ix < 0 || ix >= Doc.Width) continue;
+
+                    int di = rowD + ix * 4;
+                    int mi = rowM + xx * 4;
+                    byte a = mask[mi + 3];
+                    if (a == 0) continue;
+
+                    // Clear selected pixel to opaque white
+                    dst[di + 0] = 255;
+                    dst[di + 1] = 255;
+                    dst[di + 2] = 255;
+                    dst[di + 3] = 255;
+                }
+            }
+
+            Marshal.Copy(dst, 0, Doc.Image.Data, dst.Length);
+        }
 
         private void TranslateSelectionGeometry(double dx, double dy)
         {
@@ -1926,6 +1990,9 @@ private void ClearDocRegionWithMaskToWhite(int x, int y, int w, int h, byte[] ma
 
             // Keep InkCanvas clipping in sync
             _paint.Clip = _selectionClip;
+
+            // Mask now outdated
+            MarkSelectionDirty();
 
             // Update visuals and bounding rectangle if present
             if (_activeSelectionRect is WRect rr && !rr.IsEmpty)

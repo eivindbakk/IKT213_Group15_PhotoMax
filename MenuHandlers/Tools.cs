@@ -1,9 +1,4 @@
-// File: MenuHandlers/Tools.cs
-using System;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Controls;
+
 using System.Windows.Controls.Primitives;
 using System.Windows.Ink;
 using System.Windows.Input;
@@ -52,6 +47,7 @@ namespace PhotoMax
         private bool _isMoving = false;
         private bool _isResizing = false;
         private string _resizeCorner = "";         // "NW","NE","SW","SE"
+        private Color _textColor;                   // color used for text (defaults to _brushColor)
 
         // ----------------- ZOOM (menu handlers) -----------------
         private void Zoom_In_Click(object sender, RoutedEventArgs e)
@@ -67,18 +63,6 @@ namespace PhotoMax
                 var p = ViewportPointToWorkspaceBeforeZoom(m);
                 SetZoomToCursor(next, m, p);
             }
-        }
-        
-        private void Tool_MoveTool_Click(object sender, RoutedEventArgs e)
-        {
-            // Switch to Move tool while keeping selection sticky
-            _eraseMode = false;
-            Text_Disarm();                     // exit text tool if active
-            UpdateBrushPreviewVisibility(false);
-            PaintCanvas.Cursor = Cursors.SizeAll;
-
-            _img?.BeginMoveSelectedArea();     // start moving the current selection if there is one
-            StatusText.Content = "Move tool: drag the selected area; press Enter to bake. Switch back to Brush to paint inside.";
         }
 
         private void Zoom_Out_Click(object sender, RoutedEventArgs e)
@@ -140,13 +124,11 @@ namespace PhotoMax
         private bool HasSelectionClip()
             => _img != null && _img.SelectionFill != null;
 
-        // Tools.cs
         private bool PixelIsInsideSelection(int x, int y)
         {
             // Falls back to true if no selection or _img not ready
             return _img?.PixelFullyInsideSelection(x, y) ?? true;
         }
-
 
         internal void ApplyInkBrushAttributes()
         {
@@ -177,7 +159,7 @@ namespace PhotoMax
             SyncBrushPreviewColor();
 
             int eff = ComputeEffectiveBrushSizePx();
-            StatusText.Content = _eraseMode   // <- from MainWindow.xaml.cs
+            StatusText.Content = _eraseMode
                 ? $"Eraser ON • Size: {eff}px"
                 : $"Brush • Color: #{_brushColor.R:X2}{_brushColor.G:X2}{_brushColor.B:X2} • Size: {eff}px";
         }
@@ -381,7 +363,6 @@ namespace PhotoMax
             }
         }
 
-        // Replace the whole method with this version
         private void FillSquareIntoOverlay(int cx, int cy, int eff, Color color)
         {
             if (_liveWB == null || _liveBuf == null) return;
@@ -423,7 +404,6 @@ namespace PhotoMax
             _liveWB.WritePixels(new Int32Rect(0, 0, w, h), _liveBuf, w * 4, 0);
         }
 
-        // In MenuHandlers/Tools.cs, inside partial class MainWindow
         private void CommitOverlayToImage()
         {
             if (_img == null || _liveWB == null || _liveBuf == null) return;
@@ -456,9 +436,8 @@ namespace PhotoMax
 
             Marshal.Copy(dst, 0, mat.Data, dst.Length);
             _img.ForceRefreshView();
-            _hasUnsavedChanges = true; // from MainWindow.xaml.cs (private, same partial class)
+            _hasUnsavedChanges = true; // from MainWindow.xaml.cs
         }
-
 
         // ----------------- Brush preview (zoom-aware, snapped) -----------------
         private void EnsureBrushPreview()
@@ -520,7 +499,6 @@ namespace PhotoMax
             UpdateBrushPreviewAt(e.GetPosition(PaintCanvas));
         }
 
-        /// <summary>Keep the preview outline thickness ~1 *screen* pixel regardless of zoom.</summary>
         internal void SyncBrushPreviewStrokeToZoom()
         {
             if (_brushPreview == null) return;
@@ -535,7 +513,6 @@ namespace PhotoMax
             _brushPreview.SnapsToDevicePixels = true;
         }
 
-        // Keep preview color synced when brush color changes
         private void SyncBrushPreviewColor()
         {
             if (_brushPreview == null) return;
@@ -576,6 +553,18 @@ namespace PhotoMax
         }
 
         // ----------------- Tools menu extras for selection -----------------
+        private void Tool_MoveTool_Click(object sender, RoutedEventArgs e)
+        {
+            _eraseMode = false;
+            Shapes_Disarm();              // ← disarm shapes when moving
+            Text_Disarm();
+            UpdateBrushPreviewVisibility(false);
+            PaintCanvas.Cursor = Cursors.SizeAll;
+
+            _img?.BeginMoveSelectedArea();
+            StatusText.Content = "Move tool: drag the selected area; press Enter to bake. Switch back to Brush to paint inside.";
+        }
+
         private void Tool_MoveSelection_Click(object sender, RoutedEventArgs e)
             => _img?.BeginMoveSelectedArea();
 
@@ -589,6 +578,7 @@ namespace PhotoMax
         private void Tool_Erase_Click(object sender, RoutedEventArgs e)
         {
             _eraseMode = !_eraseMode;
+            Shapes_Disarm();              // ← disarm shapes when erasing
             Text_Disarm();
             PaintCanvas.Cursor = Cursors.None;
             UpdateBrushPreviewVisibility(true);
@@ -604,13 +594,15 @@ namespace PhotoMax
                 _eraseMode = false;
                 UpdateBrushPreviewVisibility(!_textToolArmed);
                 ApplyInkBrushAttributes();
-                if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_brushColor);
+                if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_textColor);
+                _textColor = _brushColor;
             }
         }
 
         private void Tool_Brushes_Click(object sender, RoutedEventArgs e)
         {
             _eraseMode = false;
+            Shapes_Disarm();              // ← make sure shapes stop intercepting input
             Text_Disarm();
             PaintCanvas.Cursor = Cursors.None;
             UpdateBrushPreviewVisibility(true);
@@ -622,13 +614,15 @@ namespace PhotoMax
         private void Tool_TextBox_Click(object sender, RoutedEventArgs e)
         {
             if (!EnsureImageOpen()) return;
-
-            Text_Disarm(); // clear any existing
+            Shapes_Disarm();              // ← disarm shapes before arming text
+            Text_Disarm();                // clear any existing text box
             _textToolArmed = true;
             _textPhase = TextPhase.Arming;
+            _textColor = _brushColor;
+            _textColor = _brushColor;     // default text color follows brush color
             UpdateBrushPreviewVisibility(false);
             PaintCanvas.Cursor = Cursors.Cross;
-            StatusText.Content = "Text: drag to create a box; right-click for size/commit.";
+            StatusText.Content = "Text: drag to create a box; right-click for size/color/commit.";
         }
 
         private void Text_OnCanvasMouseDown(object? sender, MouseButtonEventArgs e)
@@ -646,13 +640,13 @@ namespace PhotoMax
                     _isResizing = true; _resizeCorner = corner;
                     _boxStart = box; _moveStart = pos;
                     PaintCanvas.CaptureMouse();
-                    e.Handled = true; return;  // important: stop TextBox selection
+                    e.Handled = true; return;  // stop TextBox selection
                 }
                 if (box.Contains(pos))
                 {
                     _isMoving = true; _boxStart = box; _moveStart = pos;
                     PaintCanvas.CaptureMouse();
-                    e.Handled = true; return;  // important: stop TextBox selection
+                    e.Handled = true; return;  // stop TextBox selection
                 }
             }
 
@@ -776,30 +770,41 @@ namespace PhotoMax
             {
                 BorderBrush = Brushes.DeepSkyBlue,
                 BorderThickness = new Thickness(1),
-                Background = Brushes.Transparent,
+                Background = Brushes.Transparent, // keep transparent
                 SnapsToDevicePixels = true
             };
             Panel.SetZIndex(_textBorder, 1006);
 
             _textEditor = new TextBox
             {
-                Background = Brushes.Transparent,
+                Background = Brushes.Transparent,                 // transparent editor
                 BorderThickness = new Thickness(0),
-                Foreground = new SolidColorBrush(_brushColor),
+                Foreground = new SolidColorBrush(_textColor),
                 FontSize = _textFontPx,
                 AcceptsReturn = true,
                 TextWrapping = TextWrapping.Wrap,
                 Padding = new Thickness(2),
                 SpellCheck = { IsEnabled = false }
             };
+            TextOptions.SetTextFormattingMode(_textEditor, TextFormattingMode.Display);
+            TextOptions.SetTextRenderingMode(_textEditor, TextRenderingMode.Grayscale);
+            TextOptions.SetTextHintingMode(_textEditor, TextHintingMode.Fixed);
+
+
+            // Force grayscale AA to avoid TextRenderingMode.Grayscale halos on transparent bg
+            TextOptions.SetTextFormattingMode(_textEditor, TextFormattingMode.Display);
+            TextOptions.SetTextRenderingMode(_textEditor, TextRenderingMode.Grayscale);
 
             // right-click menu (attach to BOTH border and editor)
             var cm = new ContextMenu();
             MenuItem inc = new MenuItem { Header = "Font Size +2" };
             MenuItem dec = new MenuItem { Header = "Font Size -2" };
             MenuItem set = new MenuItem { Header = "Set Font Size..." };
+            MenuItem color = new MenuItem { Header = "Set Text Color..." };
+            MenuItem colorPick = new MenuItem { Header = "Text Color..." };
             MenuItem commit = new MenuItem { Header = "Commit (Ctrl+Enter)" };
             MenuItem cancel = new MenuItem { Header = "Cancel (Esc)" };
+
             inc.Click += (_, __) => { _textFontPx = Math.Clamp(_textFontPx + 2, 6, 256); if (_textEditor != null) _textEditor.FontSize = _textFontPx; };
             dec.Click += (_, __) => { _textFontPx = Math.Clamp(_textFontPx - 2, 6, 256); if (_textEditor != null) _textEditor.FontSize = _textFontPx; };
             set.Click += (_, __) =>
@@ -807,10 +812,21 @@ namespace PhotoMax
                 string s = Interaction.InputBox("Font size (px):", "Text", _textFontPx.ToString());
                 if (int.TryParse(s, out int px)) { _textFontPx = Math.Clamp(px, 6, 256); if (_textEditor != null) _textEditor.FontSize = _textFontPx; }
             };
+            colorPick.Click += (_, __) =>
+            {
+                using var dlg = new WF.ColorDialog { AllowFullOpen = true, FullOpen = true, Color = System.Drawing.Color.FromArgb(_textColor.R, _textColor.G, _textColor.B) };
+                if (dlg.ShowDialog() == WF.DialogResult.OK)
+                {
+                    _textColor = Color.FromRgb(dlg.Color.R, dlg.Color.G, dlg.Color.B);
+                    if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_textColor);
+                }
+            };
             commit.Click += (_, __) => Text_Commit();
+            color.Click += (_, __) => { using var dlg = new WF.ColorDialog { AllowFullOpen = true, FullOpen = true }; if (dlg.ShowDialog() == WF.DialogResult.OK) { _textColor = System.Windows.Media.Color.FromRgb(dlg.Color.R, dlg.Color.G, dlg.Color.B); if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_textColor); } };
             cancel.Click += (_, __) => Text_Disarm();
+
             cm.Items.Add(inc); cm.Items.Add(dec); cm.Items.Add(new Separator());
-            cm.Items.Add(set); cm.Items.Add(new Separator());
+            cm.Items.Add(set); cm.Items.Add(colorPick); cm.Items.Add(new Separator());
             cm.Items.Add(commit); cm.Items.Add(cancel);
             _textBorder.ContextMenu = cm;
             _textEditor.ContextMenu = cm;       // <- important
@@ -898,87 +914,77 @@ namespace PhotoMax
 
         private void Text_Commit()
         {
-            if (_textBorder == null || _textEditor == null || _img?.Doc == null) return;
+    if (_textBorder == null || _textEditor == null || _img == null || _img.Mat == null || _img.Mat.Empty()) return;
 
-            // Render text area to bitmap
-            int w = (int)Math.Round(_textBorder.Width);
-            int h = (int)Math.Round(_textBorder.Height);
-            if (w < 1 || h < 1) { Text_Disarm(); return; }
+    int w = (int)Math.Round(_textBorder.Width);
+    int h = (int)Math.Round(_textBorder.Height);
+    if (w < 1 || h < 1) { Text_Disarm(); return; }
 
-            // Create a clean visual (TextBlock) to avoid caret rendering
-            var tb = new TextBlock
-            {
-                Text = _textEditor.Text,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(_brushColor),
-                FontSize = _textFontPx,
-                Background = Brushes.Transparent,
-                Width = w,
-                Height = h,
-                Padding = new Thickness(2)
-            };
-            tb.Measure(new WpfSize(w, h));
-            tb.Arrange(new WpfRect(0, 0, w, h));
+    var tb = new TextBlock
+    {
+        Text = _textEditor.Text,
+        TextWrapping = TextWrapping.Wrap,
+        Foreground = new SolidColorBrush(_textColor),
+        Background = Brushes.Transparent,
+        Width = w,
+        Height = h,
+        Padding = new Thickness(2)
+    };
+    TextOptions.SetTextFormattingMode(tb, TextFormattingMode.Display);
+    TextOptions.SetTextRenderingMode(tb, TextRenderingMode.Grayscale);
+    TextOptions.SetTextHintingMode(tb, TextHintingMode.Fixed);
+    tb.Measure(new System.Windows.Size(w, h));
+    tb.Arrange(new System.Windows.Rect(0, 0, w, h));
 
-            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-            rtb.Render(tb);
+    var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+    rtb.Render(tb);
+    var stride = w * 4;
+    var pbgra = new byte[h * stride];
+    rtb.CopyPixels(pbgra, stride, 0);
 
-            var stride = w * 4;
-            var pbgra = new byte[h * stride];
-            rtb.CopyPixels(pbgra, stride, 0);
+    var mat = _img.Mat;
+    int imgW = mat.Width, imgH = mat.Height;
+    int step = (int)mat.Step();
+    var dst = new byte[step * imgH];
+    System.Runtime.InteropServices.Marshal.Copy(mat.Data, dst, 0, dst.Length);
 
-            // Un-premultiply to straight BGRA
-            var bgra = new byte[pbgra.Length];
-            for (int i = 0; i < pbgra.Length; i += 4)
-            {
-                byte a = pbgra[i + 3];
-                if (a == 0) { bgra[i] = bgra[i + 1] = bgra[i + 2] = 0; bgra[i + 3] = 0; continue; }
-                bgra[i + 0] = (byte)Math.Min(255, (pbgra[i + 0] * 255 + (a >> 1)) / a); // B
-                bgra[i + 1] = (byte)Math.Min(255, (pbgra[i + 1] * 255 + (a >> 1)) / a); // G
-                bgra[i + 2] = (byte)Math.Min(255, (pbgra[i + 2] * 255 + (a >> 1)) / a); // R
-                bgra[i + 3] = a;
-            }
+    int left = (int)Math.Round(InkCanvas.GetLeft(_textBorder));
+    int top  = (int)Math.Round(InkCanvas.GetTop(_textBorder));
 
-            // Blend into Mat at (left, top)
-            int imgW = _img.Doc.Width, imgH = _img.Doc.Height;
-            int step = (int)_img.Doc.Image.Step();
-            var dst = new byte[step * imgH];
-            Marshal.Copy(_img.Doc.Image.Data, dst, 0, dst.Length);
+    for (int y = 0; y < h; y++)
+    {
+        int iy = top + y; if (iy < 0 || iy >= imgH) continue;
+        int dstRow = iy * step;
+        int srcRow = y * stride;
+        for (int x = 0; x < w; x++)
+        {
+            int ix = left + x; if (ix < 0 || ix >= imgW) continue;
 
-            int left = (int)Math.Round(InkCanvas.GetLeft(_textBorder));
-            int top  = (int)Math.Round(InkCanvas.GetTop(_textBorder));
+            int si = srcRow + x * 4;
+            byte sb = pbgra[si + 0];
+            byte sg = pbgra[si + 1];
+            byte sr = pbgra[si + 2];
+            byte sa = pbgra[si + 3];
+            if (sa == 0) continue;
 
-            for (int y = 0; y < h; y++)
-            {
-                int iy = top + y; if (iy < 0 || iy >= imgH) continue;
-                int dstRow = iy * step;
-                int srcRow = y * stride;
-                for (int x = 0; x < w; x++)
-                {
-                    int ix = left + x; if (ix < 0 || ix >= imgW) continue;
+            int di = dstRow + ix * 4;
+            int invA = 255 - sa;
 
-                    int si = srcRow + x * 4;
-                    byte a = bgra[si + 3];
-                    if (a == 0) continue;
-
-                    int di = dstRow + ix * 4;
-
-                    // Alpha blend: out = dst*(1-a) + src*a
-                    int invA = 255 - a;
-                    dst[di + 0] = (byte)((dst[di + 0] * invA + bgra[si + 0] * a) / 255);
-                    dst[di + 1] = (byte)((dst[di + 1] * invA + bgra[si + 1] * a) / 255);
-                    dst[di + 2] = (byte)((dst[di + 2] * invA + bgra[si + 2] * a) / 255);
-                    dst[di + 3] = 255;
-                }
-            }
-
-            Marshal.Copy(dst, 0, _img.Doc.Image.Data, dst.Length);
-            _img.ForceRefreshView();
-
-            StatusText.Content = "Text committed.";
-            _hasUnsavedChanges = true;
-            Text_Disarm();
+            // premultiplied source: sb,sg,sr already include alpha
+            // out = src + dst*(1-a)
+            dst[di + 0] = (byte)((sb + (dst[di + 0] * invA + 127) / 255));
+            dst[di + 1] = (byte)((sg + (dst[di + 1] * invA + 127) / 255));
+            dst[di + 2] = (byte)((sr + (dst[di + 2] * invA + 127) / 255));
+            dst[di + 3] = 255;
         }
+    }
+
+    System.Runtime.InteropServices.Marshal.Copy(dst, 0, mat.Data, dst.Length);
+    _img.ForceRefreshView();
+    StatusText.Content = "Text committed.";
+    _hasUnsavedChanges = true;
+    Text_Disarm();
+}
 
         private void Text_Disarm()
         {
@@ -1207,8 +1213,6 @@ namespace PhotoMax
                         for (int y = 0; y < h; y++)
                         {
                             Buffer.BlockCopy(srcBytes, y * srcStep, dstBytes, y * step, rowBytes);
-                            // ensure alpha fully opaque where source alpha is >0
-                            // (already handled by keeping alpha channel from _lpSrc)
                         }
                         Marshal.Copy(dstBytes, 0, _img.Mat.Data, dstBytes.Length);
                         _img.ForceRefreshView();
