@@ -1,4 +1,10 @@
+// File: MenuHandlers/Tools.cs
 
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Ink;
 using System.Windows.Input;
@@ -11,43 +17,49 @@ using WF = System.Windows.Forms;
 
 // ---- Aliases to avoid type clashes ----
 using WpfPoint = System.Windows.Point;
-using WpfRect  = System.Windows.Rect;
-using WpfSize  = System.Windows.Size;
-using CvPoint  = OpenCvSharp.Point;
-using CvSize   = OpenCvSharp.Size;
+using WpfRect = System.Windows.Rect;
+using WpfSize = System.Windows.Size;
+using CvPoint = OpenCvSharp.Point;
+using CvSize = OpenCvSharp.Size;
 
 namespace PhotoMax
 {
     public partial class MainWindow
     {
         // ===== Live blocky drawing state (strict bitmap overlay) =====
-        private Image? _liveImage;                 // sits above InkCanvas
-        private WriteableBitmap? _liveWB;          // BGRA32, same size as Doc
-        private byte[]? _liveBuf;                  // backing buffer for _liveWB
+        private Image? _liveImage; // sits above InkCanvas
+        private WriteableBitmap? _liveWB; // BGRA32, same size as Doc
+        private byte[]? _liveBuf; // backing buffer for _liveWB
         private bool _isDrawing = false;
         private readonly List<WpfPoint> _snappedPoints = new();
 
         // Cursor preview (zoom-aware outline of true stamp footprint)
-        private Rectangle? _brushPreview;          // outline showing true brush footprint
+        private Rectangle? _brushPreview; // outline showing true brush footprint
         private bool _liveHooks = false;
 
         // ----------------- Text tool (interactive) -----------------
-        private enum TextPhase { None, Arming, Dragging, Editing }
+        private enum TextPhase
+        {
+            None,
+            Arming,
+            Dragging,
+            Editing
+        }
+
         private TextPhase _textPhase = TextPhase.None;
         private bool _textToolArmed = false;
 
-        private Rectangle? _textDragRect;          // rubber-band while dragging
-        private Border? _textBorder;               // visual box
-        private TextBox? _textEditor;              // live editor (wraps)
+        private Rectangle? _textDragRect; // rubber-band while dragging
+        private Border? _textBorder; // visual box
+        private TextBox? _textEditor; // live editor (wraps)
         private readonly List<Rectangle> _textHandles = new(); // 4 corner handles
-        private double _textFontPx = 24;           // default font size (px)
-        private WpfPoint _textDragStart;           // start of box (image px)
-        private WpfPoint _moveStart;               // move/resize helpers
-        private WpfRect _boxStart;                 // box snapshot at begin drag
+        private double _textFontPx = 24; // default font size (px)
+        private WpfPoint _textDragStart; // start of box (image px)
+        private WpfPoint _moveStart; // move/resize helpers
+        private WpfRect _boxStart; // box snapshot at begin drag
         private bool _isMoving = false;
         private bool _isResizing = false;
-        private string _resizeCorner = "";         // "NW","NE","SW","SE"
-        private Color _textColor;                   // color used for text (defaults to _brushColor)
+        private string _resizeCorner = ""; // "NW","NE","SW","SE"
 
         // ----------------- ZOOM (menu handlers) -----------------
         private void Zoom_In_Click(object sender, RoutedEventArgs e)
@@ -64,6 +76,20 @@ namespace PhotoMax
                 SetZoomToCursor(next, m, p);
             }
         }
+
+        private void Tool_MoveTool_Click(object sender, RoutedEventArgs e)
+        {
+            _eraseMode = false;
+            Shapes_Disarm(); // ← disarm shapes when moving
+            Text_Disarm();
+            UpdateBrushPreviewVisibility(false);
+            PaintCanvas.Cursor = Cursors.SizeAll;
+
+            _img?.BeginMoveSelectedArea();
+            StatusText.Content =
+                "Move tool: drag the selected area; press Enter to bake. Switch back to Brush to paint inside.";
+        }
+
 
         private void Zoom_Out_Click(object sender, RoutedEventArgs e)
         {
@@ -85,7 +111,7 @@ namespace PhotoMax
         private void Zoom_Fit_Click(object? sender, RoutedEventArgs e)
         {
             var margin = 16.0;
-            var vw = System.Math.Max(1, Scroller.ViewportWidth  - margin);
+            var vw = System.Math.Max(1, Scroller.ViewportWidth - margin);
             var vh = System.Math.Max(1, Scroller.ViewportHeight - margin);
 
             var cw = System.Math.Max(1, Artboard.ActualWidth);
@@ -103,8 +129,8 @@ namespace PhotoMax
                 imgMin = System.Math.Max(1, System.Math.Min(_img.Doc.Width, _img.Doc.Height));
 
             int baseSize = _brushSizes[_brushIndex]; // <- from MainWindow.xaml.cs
-            int minPx   = imgMin > 0 ? System.Math.Max(1, imgMin / 24) : 1;
-            int eff     = System.Math.Max(baseSize, minPx);
+            int minPx = imgMin > 0 ? System.Math.Max(1, imgMin / 24) : 1;
+            int eff = System.Math.Max(baseSize, minPx);
             return System.Math.Clamp(eff, 1, 256);
         }
 
@@ -113,10 +139,10 @@ namespace PhotoMax
             int half = eff / 2;
             int minCenX = half;
             int minCenY = half;
-            int maxCenX = Math.Max(half, w - eff + half);
-            int maxCenY = Math.Max(half, h - eff + half);
-            cx = Math.Clamp(cx, minCenX, maxCenX);
-            cy = Math.Clamp(cy, minCenY, maxCenY);
+            int maxCenX = System.Math.Max(half, w - eff + half);
+            int maxCenY = System.Math.Max(half, h - eff + half);
+            cx = System.Math.Clamp(cx, minCenX, maxCenX);
+            cy = System.Math.Clamp(cy, minCenY, maxCenY);
             return (cx, cy);
         }
 
@@ -124,11 +150,13 @@ namespace PhotoMax
         private bool HasSelectionClip()
             => _img != null && _img.SelectionFill != null;
 
+        // Tools.cs
         private bool PixelIsInsideSelection(int x, int y)
         {
             // Falls back to true if no selection or _img not ready
             return _img?.PixelFullyInsideSelection(x, y) ?? true;
         }
+
 
         internal void ApplyInkBrushAttributes()
         {
@@ -142,7 +170,7 @@ namespace PhotoMax
             da.FitToCurve = false;
             da.StylusTip = StylusTip.Rectangle;
             da.StylusTipTransform = Matrix.Identity;
-            da.Color = _brushColor;           // <- from MainWindow.xaml.cs
+            da.Color = _brushColor; // <- from MainWindow.xaml.cs
             da.Width = 1;
             da.Height = 1;
 
@@ -159,7 +187,7 @@ namespace PhotoMax
             SyncBrushPreviewColor();
 
             int eff = ComputeEffectiveBrushSizePx();
-            StatusText.Content = _eraseMode
+            StatusText.Content = _eraseMode // <- from MainWindow.xaml.cs
                 ? $"Eraser ON • Size: {eff}px"
                 : $"Brush • Color: #{_brushColor.R:X2}{_brushColor.G:X2}{_brushColor.B:X2} • Size: {eff}px";
         }
@@ -190,7 +218,7 @@ namespace PhotoMax
                 else
                 {
                     _liveImage.Source = _liveWB;
-                    _liveImage.Width  = w;
+                    _liveImage.Width = w;
                     _liveImage.Height = h;
                 }
 
@@ -218,15 +246,15 @@ namespace PhotoMax
             // Brush live drawing (already uses Preview*)
             PaintCanvas.PreviewMouseDown += PaintCanvas_PreviewMouseDown_BeginDraw;
             PaintCanvas.PreviewMouseMove += PaintCanvas_PreviewMouseMove_Draw;
-            PaintCanvas.PreviewMouseUp   += PaintCanvas_PreviewMouseUp_EndDraw;
+            PaintCanvas.PreviewMouseUp += PaintCanvas_PreviewMouseUp_EndDraw;
 
             // Text tool — use Preview* so TextBox can't swallow the events
             PaintCanvas.PreviewMouseLeftButtonDown += Text_OnCanvasMouseDown;
-            PaintCanvas.PreviewMouseMove           += Text_OnCanvasMouseMove;
-            PaintCanvas.PreviewMouseLeftButtonUp   += Text_OnCanvasMouseUp;
-            PaintCanvas.PreviewKeyDown             += Text_OnPreviewKeyDown;
+            PaintCanvas.PreviewMouseMove += Text_OnCanvasMouseMove;
+            PaintCanvas.PreviewMouseLeftButtonUp += Text_OnCanvasMouseUp;
+            PaintCanvas.PreviewKeyDown += Text_OnPreviewKeyDown;
 
-            PaintCanvas.MouseMove  += PaintCanvas_MouseMove_UpdatePreview;
+            PaintCanvas.MouseMove += PaintCanvas_MouseMove_UpdatePreview;
             PaintCanvas.MouseLeave += (_, __) =>
             {
                 UpdateBrushPreviewVisibility(false);
@@ -316,7 +344,7 @@ namespace PhotoMax
             int x = (int)System.Math.Round(p.X);
             int y = (int)System.Math.Round(p.Y);
 
-            int w = _img?.Doc?.Width  ?? int.MaxValue;
+            int w = _img?.Doc?.Width ?? int.MaxValue;
             int h = _img?.Doc?.Height ?? int.MaxValue;
 
             if (w != int.MaxValue && h != int.MaxValue)
@@ -324,6 +352,7 @@ namespace PhotoMax
                 x = System.Math.Clamp(x, 0, System.Math.Max(0, w - 1));
                 y = System.Math.Clamp(y, 0, System.Math.Max(0, h - 1));
             }
+
             return new WpfPoint(x, y);
         }
 
@@ -344,8 +373,18 @@ namespace PhotoMax
                 {
                     yield return (x, y);
                     if (x == x1) break;
-                    if (d <= 0) { d += incrE; x += sx; }
-                    else { d += incrNE; x += sx; y += sy; yield return (x - sx, y); }
+                    if (d <= 0)
+                    {
+                        d += incrE;
+                        x += sx;
+                    }
+                    else
+                    {
+                        d += incrNE;
+                        x += sx;
+                        y += sy;
+                        yield return (x - sx, y);
+                    }
                 }
             }
             else
@@ -357,8 +396,18 @@ namespace PhotoMax
                 {
                     yield return (x, y);
                     if (y == y1) break;
-                    if (d <= 0) { d += incrN; y += sy; }
-                    else { d += incrNE; y += sy; x += sx; yield return (x, y - sy); }
+                    if (d <= 0)
+                    {
+                        d += incrN;
+                        y += sy;
+                    }
+                    else
+                    {
+                        d += incrNE;
+                        y += sy;
+                        x += sx;
+                        yield return (x, y - sy);
+                    }
                 }
             }
         }
@@ -370,11 +419,11 @@ namespace PhotoMax
             int half = eff / 2;
 
             int left = cx - half;
-            int top  = cy - half;
+            int top = cy - half;
             if (left < 0) left = 0;
-            if (top  < 0)  top = 0;
-            int right  = Math.Min(w, left + eff);
-            int bottom = Math.Min(h, top + eff);
+            if (top < 0) top = 0;
+            int right = System.Math.Min(w, left + eff);
+            int bottom = System.Math.Min(h, top + eff);
             if (right <= left || bottom <= top) return;
 
             bool hasSel = HasSelectionClip();
@@ -419,8 +468,8 @@ namespace PhotoMax
 
             for (int y = 0; y < h; y++)
             {
-                int rb = y * w * 4;   // buffer row
-                int rd = y * step;    // mat row
+                int rb = y * w * 4; // buffer row
+                int rd = y * step; // mat row
                 for (int x = 0; x < w; x++)
                 {
                     int i = rb + x * 4;
@@ -438,6 +487,7 @@ namespace PhotoMax
             _img.ForceRefreshView();
             _hasUnsavedChanges = true; // from MainWindow.xaml.cs
         }
+
 
         // ----------------- Brush preview (zoom-aware, snapped) -----------------
         private void EnsureBrushPreview()
@@ -468,7 +518,11 @@ namespace PhotoMax
         private void UpdateBrushPreviewAt(WpfPoint canvasPos)
         {
             if (_brushPreview == null) return;
-            if (_img == null || _img.Doc == null) { UpdateBrushPreviewVisibility(false); return; }
+            if (_img == null || _img.Doc == null)
+            {
+                UpdateBrushPreviewVisibility(false);
+                return;
+            }
 
             var s = SnapToImagePixel(canvasPos);
             int eff = ComputeEffectiveBrushSizePx();
@@ -477,14 +531,14 @@ namespace PhotoMax
             var fit = ClampCenterToFit((int)s.X, (int)s.Y, eff, w, h);
 
             int left = fit.cx - eff / 2;
-            int top  = fit.cy - eff / 2;
+            int top = fit.cy - eff / 2;
 
             _brushPreview.Stroke = _eraseMode ? Brushes.Red : new SolidColorBrush(_brushColor);
             _brushPreview.Fill = Brushes.Transparent;
 
             InkCanvas.SetLeft(_brushPreview, left);
-            InkCanvas.SetTop (_brushPreview, top);
-            _brushPreview.Width  = eff;
+            InkCanvas.SetTop(_brushPreview, top);
+            _brushPreview.Width = eff;
             _brushPreview.Height = eff;
 
             SyncBrushPreviewStrokeToZoom();
@@ -503,7 +557,7 @@ namespace PhotoMax
         {
             if (_brushPreview == null) return;
 
-            double thickness = 1.0 / Math.Max(0.0001, _zoom);
+            double thickness = 1.0 / System.Math.Max(0.0001, _zoom);
             if (thickness < 0.5) thickness = 0.5;
             if (thickness > 2.0) thickness = 2.0;
 
@@ -513,6 +567,7 @@ namespace PhotoMax
             _brushPreview.SnapsToDevicePixels = true;
         }
 
+        // Keep preview color synced when brush color changes
         private void SyncBrushPreviewColor()
         {
             if (_brushPreview == null) return;
@@ -528,6 +583,7 @@ namespace PhotoMax
                 MessageBox.Show("Open an image first.");
                 return false;
             }
+
             return true;
         }
 
@@ -535,36 +591,24 @@ namespace PhotoMax
         {
             if (_img?.Doc == null) return r;
             int w = _img.Doc.Width, h = _img.Doc.Height;
-            double x = Math.Clamp(r.X, 0.0, (double)Math.Max(0, w - 1));
-            double y = Math.Clamp(r.Y, 0.0, (double)Math.Max(0, h - 1));
-            double right  = Math.Clamp(r.X + r.Width,  0.0, (double)w);
-            double bottom = Math.Clamp(r.Y + r.Height, 0.0, (double)h);
-            double width  = Math.Max(1.0, right - x);
-            double height = Math.Max(1.0, bottom - y);
+            double x = System.Math.Clamp(r.X, 0.0, (double)System.Math.Max(0, w - 1));
+            double y = System.Math.Clamp(r.Y, 0.0, (double)System.Math.Max(0, h - 1));
+            double right = System.Math.Clamp(r.X + r.Width, 0.0, (double)w);
+            double bottom = System.Math.Clamp(r.Y + r.Height, 0.0, (double)h);
+            double width = System.Math.Max(1.0, right - x);
+            double height = System.Math.Max(1.0, bottom - y);
             return new WpfRect(x, y, width, height);
         }
 
         private void PlaceOnCanvas(FrameworkElement fe, double x, double y, double w, double h)
         {
             InkCanvas.SetLeft(fe, x);
-            InkCanvas.SetTop (fe, y);
-            fe.Width  = w;
+            InkCanvas.SetTop(fe, y);
+            fe.Width = w;
             fe.Height = h;
         }
 
         // ----------------- Tools menu extras for selection -----------------
-        private void Tool_MoveTool_Click(object sender, RoutedEventArgs e)
-        {
-            _eraseMode = false;
-            Shapes_Disarm();              // ← disarm shapes when moving
-            Text_Disarm();
-            UpdateBrushPreviewVisibility(false);
-            PaintCanvas.Cursor = Cursors.SizeAll;
-
-            _img?.BeginMoveSelectedArea();
-            StatusText.Content = "Move tool: drag the selected area; press Enter to bake. Switch back to Brush to paint inside.";
-        }
-
         private void Tool_MoveSelection_Click(object sender, RoutedEventArgs e)
             => _img?.BeginMoveSelectedArea();
 
@@ -578,12 +622,13 @@ namespace PhotoMax
         private void Tool_Erase_Click(object sender, RoutedEventArgs e)
         {
             _eraseMode = !_eraseMode;
-            Shapes_Disarm();              // ← disarm shapes when erasing
+            Shapes_Disarm(); // ← disarm shapes when erasing
             Text_Disarm();
             PaintCanvas.Cursor = Cursors.None;
             UpdateBrushPreviewVisibility(true);
             ApplyInkBrushAttributes();
         }
+
 
         private void Tool_ColorPicker_Click(object sender, RoutedEventArgs e)
         {
@@ -594,15 +639,14 @@ namespace PhotoMax
                 _eraseMode = false;
                 UpdateBrushPreviewVisibility(!_textToolArmed);
                 ApplyInkBrushAttributes();
-                if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_textColor);
-                _textColor = _brushColor;
+                if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_brushColor);
             }
         }
 
         private void Tool_Brushes_Click(object sender, RoutedEventArgs e)
         {
             _eraseMode = false;
-            Shapes_Disarm();              // ← make sure shapes stop intercepting input
+            Shapes_Disarm(); // ← make sure shapes stop intercepting input
             Text_Disarm();
             PaintCanvas.Cursor = Cursors.None;
             UpdateBrushPreviewVisibility(true);
@@ -610,16 +654,24 @@ namespace PhotoMax
             StatusText.Content = "Paint Brushes enabled.";
         }
 
+        private void Colors_BrushSize_Click(object sender, RoutedEventArgs e)
+        {
+            _brushIndex = (_brushIndex + 1) % _brushSizes.Length; // <- from MainWindow.xaml.cs
+            _eraseMode = false;
+            Text_Disarm();
+            PaintCanvas.Cursor = Cursors.None;
+            UpdateBrushPreviewVisibility(true);
+            ApplyInkBrushAttributes();
+        }
+
         // ---------- Text Box (interactive) ----------
         private void Tool_TextBox_Click(object sender, RoutedEventArgs e)
         {
             if (!EnsureImageOpen()) return;
-            Shapes_Disarm();              // ← disarm shapes before arming text
-            Text_Disarm();                // clear any existing text box
+            Shapes_Disarm(); // ← disarm shapes before arming text
+            Text_Disarm(); // clear any existing text box
             _textToolArmed = true;
             _textPhase = TextPhase.Arming;
-            _textColor = _brushColor;
-            _textColor = _brushColor;     // default text color follows brush color
             UpdateBrushPreviewVisibility(false);
             PaintCanvas.Cursor = Cursors.Cross;
             StatusText.Content = "Text: drag to create a box; right-click for size/color/commit.";
@@ -634,19 +686,27 @@ namespace PhotoMax
             // If an existing box is present, check for move/resize begin
             if (_textPhase == TextPhase.Editing && _textBorder != null)
             {
-                var box = new WpfRect(InkCanvas.GetLeft(_textBorder), InkCanvas.GetTop(_textBorder), _textBorder.Width, _textBorder.Height);
+                var box = new WpfRect(InkCanvas.GetLeft(_textBorder), InkCanvas.GetTop(_textBorder), _textBorder.Width,
+                    _textBorder.Height);
                 if (IsOverHandle(pos, out string corner))
                 {
-                    _isResizing = true; _resizeCorner = corner;
-                    _boxStart = box; _moveStart = pos;
+                    _isResizing = true;
+                    _resizeCorner = corner;
+                    _boxStart = box;
+                    _moveStart = pos;
                     PaintCanvas.CaptureMouse();
-                    e.Handled = true; return;  // stop TextBox selection
+                    e.Handled = true;
+                    return; // important: stop TextBox selection
                 }
+
                 if (box.Contains(pos))
                 {
-                    _isMoving = true; _boxStart = box; _moveStart = pos;
+                    _isMoving = true;
+                    _boxStart = box;
+                    _moveStart = pos;
                     PaintCanvas.CaptureMouse();
-                    e.Handled = true; return;  // stop TextBox selection
+                    e.Handled = true;
+                    return; // important: stop TextBox selection
                 }
             }
 
@@ -679,11 +739,12 @@ namespace PhotoMax
             var p = SnapToImagePixel(e.GetPosition(PaintCanvas));
             if (_textPhase == TextPhase.Dragging && _textDragRect != null)
             {
-                var x = Math.Min(_textDragStart.X, p.X);
-                var y = Math.Min(_textDragStart.Y, p.Y);
-                var w = Math.Abs(p.X - _textDragStart.X);
-                var h = Math.Abs(p.Y - _textDragStart.Y);
-                if (w < 1) w = 1; if (h < 1) h = 1;
+                var x = System.Math.Min(_textDragStart.X, p.X);
+                var y = System.Math.Min(_textDragStart.Y, p.Y);
+                var w = System.Math.Abs(p.X - _textDragStart.X);
+                var h = System.Math.Abs(p.Y - _textDragStart.Y);
+                if (w < 1) w = 1;
+                if (h < 1) h = 1;
                 var r = ClampRectToImage(new WpfRect(x, y, w, h));
                 PlaceOnCanvas(_textDragRect, r.X, r.Y, r.Width, r.Height);
                 e.Handled = true;
@@ -707,11 +768,13 @@ namespace PhotoMax
                 switch (_resizeCorner)
                 {
                     case "NW": r = new WpfRect(r.X + dx, r.Y + dy, r.Width - dx, r.Height - dy); break;
-                    case "NE": r = new WpfRect(r.X,       r.Y + dy, r.Width + dx, r.Height - dy); break;
-                    case "SW": r = new WpfRect(r.X + dx,  r.Y,      r.Width - dx, r.Height + dy); break;
-                    case "SE": r = new WpfRect(r.X,       r.Y,      r.Width + dx, r.Height + dy); break;
+                    case "NE": r = new WpfRect(r.X, r.Y + dy, r.Width + dx, r.Height - dy); break;
+                    case "SW": r = new WpfRect(r.X + dx, r.Y, r.Width - dx, r.Height + dy); break;
+                    case "SE": r = new WpfRect(r.X, r.Y, r.Width + dx, r.Height + dy); break;
                 }
-                if (r.Width < 1) r.Width = 1; if (r.Height < 1) r.Height = 1;
+
+                if (r.Width < 1) r.Width = 1;
+                if (r.Height < 1) r.Height = 1;
                 r = ClampRectToImage(r);
 
                 PlaceOnCanvas(_textBorder, r.X, r.Y, r.Width, r.Height);
@@ -727,7 +790,8 @@ namespace PhotoMax
             if (_textPhase == TextPhase.Dragging && _textDragRect != null)
             {
                 // finalize box and enter editing
-                var r = new WpfRect(InkCanvas.GetLeft(_textDragRect), InkCanvas.GetTop(_textDragRect), _textDragRect.Width, _textDragRect.Height);
+                var r = new WpfRect(InkCanvas.GetLeft(_textDragRect), InkCanvas.GetTop(_textDragRect),
+                    _textDragRect.Width, _textDragRect.Height);
                 PaintCanvas.Children.Remove(_textDragRect);
                 _textDragRect = null;
 
@@ -740,7 +804,9 @@ namespace PhotoMax
 
             if (_isMoving || _isResizing)
             {
-                _isMoving = false; _isResizing = false; _resizeCorner = "";
+                _isMoving = false;
+                _isResizing = false;
+                _resizeCorner = "";
                 PaintCanvas.ReleaseMouseCapture();
                 e.Handled = true;
             }
@@ -770,66 +836,75 @@ namespace PhotoMax
             {
                 BorderBrush = Brushes.DeepSkyBlue,
                 BorderThickness = new Thickness(1),
-                Background = Brushes.Transparent, // keep transparent
+                Background = Brushes.Transparent,
                 SnapsToDevicePixels = true
             };
             Panel.SetZIndex(_textBorder, 1006);
 
             _textEditor = new TextBox
             {
-                Background = Brushes.Transparent,                 // transparent editor
+                Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
-                Foreground = new SolidColorBrush(_textColor),
+                Foreground = new SolidColorBrush(_brushColor),
                 FontSize = _textFontPx,
                 AcceptsReturn = true,
                 TextWrapping = TextWrapping.Wrap,
                 Padding = new Thickness(2),
                 SpellCheck = { IsEnabled = false }
             };
-            TextOptions.SetTextFormattingMode(_textEditor, TextFormattingMode.Display);
-            TextOptions.SetTextRenderingMode(_textEditor, TextRenderingMode.Grayscale);
-            TextOptions.SetTextHintingMode(_textEditor, TextHintingMode.Fixed);
-
-
-            // Force grayscale AA to avoid TextRenderingMode.Grayscale halos on transparent bg
-            TextOptions.SetTextFormattingMode(_textEditor, TextFormattingMode.Display);
-            TextOptions.SetTextRenderingMode(_textEditor, TextRenderingMode.Grayscale);
 
             // right-click menu (attach to BOTH border and editor)
             var cm = new ContextMenu();
             MenuItem inc = new MenuItem { Header = "Font Size +2" };
             MenuItem dec = new MenuItem { Header = "Font Size -2" };
             MenuItem set = new MenuItem { Header = "Set Font Size..." };
-            MenuItem color = new MenuItem { Header = "Set Text Color..." };
-            MenuItem colorPick = new MenuItem { Header = "Text Color..." };
+            MenuItem color = new MenuItem { Header = "Text Color..." };
             MenuItem commit = new MenuItem { Header = "Commit (Ctrl+Enter)" };
             MenuItem cancel = new MenuItem { Header = "Cancel (Esc)" };
-
-            inc.Click += (_, __) => { _textFontPx = Math.Clamp(_textFontPx + 2, 6, 256); if (_textEditor != null) _textEditor.FontSize = _textFontPx; };
-            dec.Click += (_, __) => { _textFontPx = Math.Clamp(_textFontPx - 2, 6, 256); if (_textEditor != null) _textEditor.FontSize = _textFontPx; };
+            inc.Click += (_, __) =>
+            {
+                _textFontPx = System.Math.Clamp(_textFontPx + 2, 6, 256);
+                if (_textEditor != null) _textEditor.FontSize = _textFontPx;
+            };
+            dec.Click += (_, __) =>
+            {
+                _textFontPx = System.Math.Clamp(_textFontPx - 2, 6, 256);
+                if (_textEditor != null) _textEditor.FontSize = _textFontPx;
+            };
             set.Click += (_, __) =>
             {
                 string s = Interaction.InputBox("Font size (px):", "Text", _textFontPx.ToString());
-                if (int.TryParse(s, out int px)) { _textFontPx = Math.Clamp(px, 6, 256); if (_textEditor != null) _textEditor.FontSize = _textFontPx; }
+                if (int.TryParse(s, out int px))
+                {
+                    _textFontPx = System.Math.Clamp(px, 6, 256);
+                    if (_textEditor != null) _textEditor.FontSize = _textFontPx;
+                }
             };
-            colorPick.Click += (_, __) =>
+            color.Click += (_, __) =>
             {
-                using var dlg = new WF.ColorDialog { AllowFullOpen = true, FullOpen = true, Color = System.Drawing.Color.FromArgb(_textColor.R, _textColor.G, _textColor.B) };
+                using var dlg = new WF.ColorDialog
+                {
+                    AllowFullOpen = true, FullOpen = true,
+                    Color = System.Drawing.Color.FromArgb(_brushColor.A, _brushColor.R, _brushColor.G, _brushColor.B)
+                };
                 if (dlg.ShowDialog() == WF.DialogResult.OK)
                 {
-                    _textColor = Color.FromRgb(dlg.Color.R, dlg.Color.G, dlg.Color.B);
-                    if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_textColor);
+                    _brushColor = Color.FromRgb(dlg.Color.R, dlg.Color.G, dlg.Color.B);
+                    if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_brushColor);
                 }
             };
             commit.Click += (_, __) => Text_Commit();
-            color.Click += (_, __) => { using var dlg = new WF.ColorDialog { AllowFullOpen = true, FullOpen = true }; if (dlg.ShowDialog() == WF.DialogResult.OK) { _textColor = System.Windows.Media.Color.FromRgb(dlg.Color.R, dlg.Color.G, dlg.Color.B); if (_textEditor != null) _textEditor.Foreground = new SolidColorBrush(_textColor); } };
             cancel.Click += (_, __) => Text_Disarm();
-
-            cm.Items.Add(inc); cm.Items.Add(dec); cm.Items.Add(new Separator());
-            cm.Items.Add(set); cm.Items.Add(colorPick); cm.Items.Add(new Separator());
-            cm.Items.Add(commit); cm.Items.Add(cancel);
+            cm.Items.Add(inc);
+            cm.Items.Add(dec);
+            cm.Items.Add(new Separator());
+            cm.Items.Add(set);
+            cm.Items.Add(color);
+            cm.Items.Add(new Separator());
+            cm.Items.Add(commit);
+            cm.Items.Add(cancel);
             _textBorder.ContextMenu = cm;
-            _textEditor.ContextMenu = cm;       // <- important
+            _textEditor.ContextMenu = cm;
 
             _textBorder.Child = _textEditor;
             PaintCanvas.Children.Add(_textBorder);
@@ -862,7 +937,7 @@ namespace PhotoMax
         {
             var r = new Rectangle
             {
-                Width = 8, Height = 8,                 // a bit bigger
+                Width = 8, Height = 8,
                 Fill = Brushes.DeepSkyBlue,
                 Stroke = Brushes.Black,
                 StrokeThickness = 1,
@@ -875,10 +950,11 @@ namespace PhotoMax
                 if (!_textToolArmed || _textPhase != TextPhase.Editing || _textBorder == null) return;
                 _isResizing = true;
                 _resizeCorner = (string)((FrameworkElement)s!).Tag;
-                _boxStart = new WpfRect(InkCanvas.GetLeft(_textBorder), InkCanvas.GetTop(_textBorder), _textBorder.Width, _textBorder.Height);
+                _boxStart = new WpfRect(InkCanvas.GetLeft(_textBorder), InkCanvas.GetTop(_textBorder),
+                    _textBorder.Width, _textBorder.Height);
                 _moveStart = SnapToImagePixel(e.GetPosition(PaintCanvas));
                 PaintCanvas.CaptureMouse();
-                e.Handled = true; // stop bubbling to TextBox
+                e.Handled = true;
             };
             return r;
         }
@@ -906,98 +982,180 @@ namespace PhotoMax
             foreach (var h in _textHandles)
             {
                 var r = new WpfRect(InkCanvas.GetLeft(h), InkCanvas.GetTop(h), h.Width, h.Height);
-                if (r.Contains(p)) { corner = (string)h.Tag; return true; }
+                if (r.Contains(p))
+                {
+                    corner = (string)h.Tag;
+                    return true;
+                }
             }
+
             corner = "";
             return false;
         }
 
         private void Text_Commit()
         {
-    if (_textBorder == null || _textEditor == null || _img == null || _img.Mat == null || _img.Mat.Empty()) return;
+            if (_textBorder == null || _textEditor == null || _img?.Doc == null) return;
 
-    int w = (int)Math.Round(_textBorder.Width);
-    int h = (int)Math.Round(_textBorder.Height);
-    if (w < 1 || h < 1) { Text_Disarm(); return; }
+            int w = (int)System.Math.Round(_textBorder.Width);
+            int h = (int)System.Math.Round(_textBorder.Height);
+            if (w < 1 || h < 1)
+            {
+                Text_Disarm();
+                return;
+            }
 
-    var tb = new TextBlock
-    {
-        Text = _textEditor.Text,
-        TextWrapping = TextWrapping.Wrap,
-        Foreground = new SolidColorBrush(_textColor),
-        Background = Brushes.Transparent,
-        Width = w,
-        Height = h,
-        Padding = new Thickness(2)
-    };
-    TextOptions.SetTextFormattingMode(tb, TextFormattingMode.Display);
-    TextOptions.SetTextRenderingMode(tb, TextRenderingMode.Grayscale);
-    TextOptions.SetTextHintingMode(tb, TextHintingMode.Fixed);
-    tb.Measure(new System.Windows.Size(w, h));
-    tb.Arrange(new System.Windows.Rect(0, 0, w, h));
+            string textContent = _textEditor.Text;
+            if (string.IsNullOrWhiteSpace(textContent))
+            {
+                StatusText.Content = "No text to commit.";
+                Text_Disarm();
+                return;
+            }
 
-    var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-    rtb.Render(tb);
-    var stride = w * 4;
-    var pbgra = new byte[h * stride];
-    rtb.CopyPixels(pbgra, stride, 0);
+            try
+            {
+                // Create a Grid with TextBlock to ensure proper rendering
+                var grid = new Grid
+                {
+                    Width = w,
+                    Height = h,
+                    Background = Brushes.Transparent
+                };
 
-    var mat = _img.Mat;
-    int imgW = mat.Width, imgH = mat.Height;
-    int step = (int)mat.Step();
-    var dst = new byte[step * imgH];
-    System.Runtime.InteropServices.Marshal.Copy(mat.Data, dst, 0, dst.Length);
+                var textBlock = new TextBlock
+                {
+                    Text = textContent,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = new SolidColorBrush(_brushColor),
+                    FontSize = _textEditor.FontSize,
+                    FontFamily = _textEditor.FontFamily,
+                    FontStyle = _textEditor.FontStyle,
+                    FontWeight = _textEditor.FontWeight,
+                    FontStretch = _textEditor.FontStretch,
+                    TextAlignment = _textEditor.TextAlignment,
+                    Padding = new Thickness(2),
+                    VerticalAlignment = VerticalAlignment.Top,
+                    HorizontalAlignment = HorizontalAlignment.Left
+                };
 
-    int left = (int)Math.Round(InkCanvas.GetLeft(_textBorder));
-    int top  = (int)Math.Round(InkCanvas.GetTop(_textBorder));
+                grid.Children.Add(textBlock);
 
-    for (int y = 0; y < h; y++)
-    {
-        int iy = top + y; if (iy < 0 || iy >= imgH) continue;
-        int dstRow = iy * step;
-        int srcRow = y * stride;
-        for (int x = 0; x < w; x++)
-        {
-            int ix = left + x; if (ix < 0 || ix >= imgW) continue;
+                grid.Measure(new WpfSize(w, h));
+                grid.Arrange(new WpfRect(0, 0, w, h));
 
-            int si = srcRow + x * 4;
-            byte sb = pbgra[si + 0];
-            byte sg = pbgra[si + 1];
-            byte sr = pbgra[si + 2];
-            byte sa = pbgra[si + 3];
-            if (sa == 0) continue;
+                var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(grid);
 
-            int di = dstRow + ix * 4;
-            int invA = 255 - sa;
+                var stride = w * 4;
+                var pixels = new byte[h * stride];
+                rtb.CopyPixels(pixels, stride, 0);
 
-            // premultiplied source: sb,sg,sr already include alpha
-            // out = src + dst*(1-a)
-            dst[di + 0] = (byte)((sb + (dst[di + 0] * invA + 127) / 255));
-            dst[di + 1] = (byte)((sg + (dst[di + 1] * invA + 127) / 255));
-            dst[di + 2] = (byte)((sr + (dst[di + 2] * invA + 127) / 255));
-            dst[di + 3] = 255;
+                // Debug: Check if we actually rendered anything
+                int nonZeroPixels = 0;
+                for (int i = 3; i < pixels.Length; i += 4)
+                {
+                    if (pixels[i] > 0) nonZeroPixels++;
+                }
+
+                StatusText.Content = $"Rendered {nonZeroPixels} non-transparent pixels";
+
+                if (nonZeroPixels == 0)
+                {
+                    MessageBox.Show(
+                        $"Text rendering produced no visible pixels!\nText: '{textContent}'\nColor: {_brushColor}\nFont Size: {_textEditor.FontSize}");
+                    Text_Disarm();
+                    return;
+                }
+
+                // Blend into image
+                int imgW = _img.Doc.Width, imgH = _img.Doc.Height;
+                int step = (int)_img.Doc.Image.Step();
+                var dst = new byte[step * imgH];
+                Marshal.Copy(_img.Doc.Image.Data, dst, 0, dst.Length);
+
+                int left = (int)System.Math.Round(InkCanvas.GetLeft(_textBorder));
+                int top = (int)System.Math.Round(InkCanvas.GetTop(_textBorder));
+
+                int pixelsWritten = 0;
+
+                for (int y = 0; y < h; y++)
+                {
+                    int iy = top + y;
+                    if (iy < 0 || iy >= imgH) continue;
+
+                    int dstRow = iy * step;
+                    int srcRow = y * stride;
+
+                    for (int x = 0; x < w; x++)
+                    {
+                        int ix = left + x;
+                        if (ix < 0 || ix >= imgW) continue;
+
+                        int si = srcRow + x * 4;
+                        byte a = pixels[si + 3];
+                        if (a == 0) continue;
+
+                        int di = dstRow + ix * 4;
+
+                        // Alpha blend
+                        if (a == 255)
+                        {
+                            dst[di + 0] = pixels[si + 0];
+                            dst[di + 1] = pixels[si + 1];
+                            dst[di + 2] = pixels[si + 2];
+                            dst[di + 3] = 255;
+                        }
+                        else
+                        {
+                            int invA = 255 - a;
+                            dst[di + 0] = (byte)((dst[di + 0] * invA + pixels[si + 0] * a) / 255);
+                            dst[di + 1] = (byte)((dst[di + 1] * invA + pixels[si + 1] * a) / 255);
+                            dst[di + 2] = (byte)((dst[di + 2] * invA + pixels[si + 2] * a) / 255);
+                            dst[di + 3] = 255;
+                        }
+
+                        pixelsWritten++;
+                    }
+                }
+
+                Marshal.Copy(dst, 0, _img.Doc.Image.Data, dst.Length);
+                _img.ForceRefreshView();
+
+                StatusText.Content = $"Text committed. Wrote {pixelsWritten} pixels.";
+                _hasUnsavedChanges = true;
+                Text_Disarm();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error committing text: {ex.Message}");
+                StatusText.Content = $"Error: {ex.Message}";
+            }
         }
-    }
-
-    System.Runtime.InteropServices.Marshal.Copy(dst, 0, mat.Data, dst.Length);
-    _img.ForceRefreshView();
-    StatusText.Content = "Text committed.";
-    _hasUnsavedChanges = true;
-    Text_Disarm();
-}
 
         private void Text_Disarm()
         {
             _textToolArmed = false;
             _textPhase = TextPhase.None;
 
-            if (_textDragRect != null) { PaintCanvas.Children.Remove(_textDragRect); _textDragRect = null; }
-            if (_textBorder   != null) { PaintCanvas.Children.Remove(_textBorder);   _textBorder   = null; }
+            if (_textDragRect != null)
+            {
+                PaintCanvas.Children.Remove(_textDragRect);
+                _textDragRect = null;
+            }
+
+            if (_textBorder != null)
+            {
+                PaintCanvas.Children.Remove(_textBorder);
+                _textBorder = null;
+            }
+
             foreach (var h in _textHandles) PaintCanvas.Children.Remove(h);
             _textHandles.Clear();
             _textEditor = null;
 
-            _isMoving = _isResizing = false; _resizeCorner = "";
+            _isMoving = _isResizing = false;
+            _resizeCorner = "";
             PaintCanvas.ReleaseMouseCapture();
 
             PaintCanvas.Cursor = Cursors.None;
@@ -1010,16 +1168,16 @@ namespace PhotoMax
         private Image? _lpOverlay;
         private Border? _lpToolbar;
         private Slider? _lpBinarySlider;
-        private Mat? _lpSrc;                 // clone of the active layer before preview
-        private Mat? _lpWork;                // last preview result
-        private byte[]? _lpBackupBytes;      // original bytes of the active layer
-        private WriteableBitmap? _lpWB;      // preview writeable bitmap
+        private Mat? _lpSrc;
+        private Mat? _lpWork;
+        private byte[]? _lpBackupBytes;
+        private WriteableBitmap? _lpWB;
         private int _lpW, _lpH, _lpStride;
 
         private void StartLayerPreview(string mode)
         {
             if (_img?.Mat == null || _img.Mat.Empty()) return;
-            EndLayerPreview(apply:false);  // safety
+            EndLayerPreview(apply: false);
 
             _lpMode = mode;
             _lpRunning = true;
@@ -1029,13 +1187,11 @@ namespace PhotoMax
             _lpH = _lpSrc.Height;
             _lpStride = (int)_img.Mat.Step();
 
-            // Backup current layer and hide it under the preview
             _lpBackupBytes = new byte[_lpStride * _lpH];
             Marshal.Copy(_img.Mat.Data, _lpBackupBytes, 0, _lpBackupBytes.Length);
             _img.Mat.SetTo(new Scalar(0, 0, 0, 0));
             _img.ForceRefreshView();
 
-            // Preview overlay
             _lpWB = new WriteableBitmap(_lpW, _lpH, 96, 96, PixelFormats.Bgra32, null);
             _lpOverlay = new Image { Source = _lpWB, IsHitTestVisible = false, Width = _lpW, Height = _lpH };
             RenderOptions.SetBitmapScalingMode(_lpOverlay, BitmapScalingMode.NearestNeighbor);
@@ -1058,8 +1214,16 @@ namespace PhotoMax
         private void OnLayerPreviewKeyDown(object? sender, KeyEventArgs e)
         {
             if (!_lpRunning) return;
-            if (e.Key == Key.Enter) { EndLayerPreview(apply:true); e.Handled = true; }
-            else if (e.Key == Key.Escape) { EndLayerPreview(apply:false); e.Handled = true; }
+            if (e.Key == Key.Enter)
+            {
+                EndLayerPreview(apply: true);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                EndLayerPreview(apply: false);
+                e.Handled = true;
+            }
         }
 
         private Border BuildLayerToolbar()
@@ -1078,7 +1242,7 @@ namespace PhotoMax
                 Text = $"Layer Filter: {_lpMode}",
                 Foreground = Brushes.White,
                 FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0,0,0,6)
+                Margin = new Thickness(0, 0, 0, 6)
             });
 
             if (_lpMode == "Binary")
@@ -1095,12 +1259,16 @@ namespace PhotoMax
                 stack.Children.Add(_lpBinarySlider);
             }
 
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0,6,0,0) };
-            var apply = new Button { Content = "Apply (Enter)", Margin = new Thickness(0,0,6,0), Padding = new Thickness(10,4,10,4) };
-            var cancel = new Button { Content = "Cancel (Esc)", Padding = new Thickness(10,4,10,4) };
-            apply.Click += (_, __) => EndLayerPreview(apply:true);
-            cancel.Click += (_, __) => EndLayerPreview(apply:false);
-            row.Children.Add(apply); row.Children.Add(cancel);
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+            var apply = new Button
+            {
+                Content = "Apply (Enter)", Margin = new Thickness(0, 0, 6, 0), Padding = new Thickness(10, 4, 10, 4)
+            };
+            var cancel = new Button { Content = "Cancel (Esc)", Padding = new Thickness(10, 4, 10, 4) };
+            apply.Click += (_, __) => EndLayerPreview(apply: true);
+            cancel.Click += (_, __) => EndLayerPreview(apply: false);
+            row.Children.Add(apply);
+            row.Children.Add(cancel);
             stack.Children.Add(row);
 
             border.Child = stack;
@@ -1114,15 +1282,13 @@ namespace PhotoMax
             _lpWork?.Dispose();
             _lpWork = _lpSrc.Clone();
 
-            // Keep original alpha separate to avoid haloing
             using var alpha = new Mat();
             Cv2.ExtractChannel(_lpSrc, alpha, 3);
 
             switch (_lpMode)
             {
                 case "Gaussian":
-                    Cv2.GaussianBlur(_lpSrc, _lpWork, new CvSize(5,5), 0);
-                    // restore alpha
+                    Cv2.GaussianBlur(_lpSrc, _lpWork, new CvSize(5, 5), 0);
                     Cv2.InsertChannel(alpha, _lpWork, 3);
                     break;
 
@@ -1136,14 +1302,17 @@ namespace PhotoMax
                     using (var bgr = new Mat())
                     {
                         Cv2.CvtColor(_lpSrc, gray, ColorConversionCodes.BGRA2GRAY);
-                        Cv2.Sobel(gray, gx, MatType.CV_16S, 1, 0, ksize:3, scale:1, delta:0, BorderTypes.Default);
-                        Cv2.Sobel(gray, gy, MatType.CV_16S, 0, 1, ksize:3, scale:1, delta:0, BorderTypes.Default);
+                        Cv2.Sobel(gray, gx, MatType.CV_16S, 1, 0, ksize: 3, scale: 1, delta: 0, BorderTypes.Default);
+                        Cv2.Sobel(gray, gy, MatType.CV_16S, 0, 1, ksize: 3, scale: 1, delta: 0, BorderTypes.Default);
                         Cv2.ConvertScaleAbs(gx, agx);
                         Cv2.ConvertScaleAbs(gy, agy);
                         Cv2.AddWeighted(agx, 0.5, agy, 0.5, 0, mag);
                         Cv2.CvtColor(mag, bgr, ColorConversionCodes.GRAY2BGR);
-                        Cv2.Merge(new[] { bgr.Split()[0], bgr.Split()[1], bgr.Split()[2], alpha }, _lpWork);
+                        var chans = bgr.Split();
+                        Cv2.Merge(new[] { chans[0], chans[1], chans[2], alpha }, _lpWork);
+                        foreach (var c in chans) c.Dispose();
                     }
+
                     break;
 
                 case "Binary":
@@ -1155,8 +1324,11 @@ namespace PhotoMax
                         double t = _lpBinarySlider?.Value ?? 128;
                         Cv2.Threshold(gray, bw, t, 255, ThresholdTypes.Binary);
                         Cv2.CvtColor(bw, bgr, ColorConversionCodes.GRAY2BGR);
-                        Cv2.Merge(new[] { bgr.Split()[0], bgr.Split()[1], bgr.Split()[2], alpha }, _lpWork);
+                        var chans = bgr.Split();
+                        Cv2.Merge(new[] { chans[0], chans[1], chans[2], alpha }, _lpWork);
+                        foreach (var c in chans) c.Dispose();
                     }
+
                     break;
 
                 case "Otsu":
@@ -1167,12 +1339,14 @@ namespace PhotoMax
                         Cv2.CvtColor(_lpSrc, gray, ColorConversionCodes.BGRA2GRAY);
                         Cv2.Threshold(gray, bw, 0, 255, ThresholdTypes.Binary | ThresholdTypes.Otsu);
                         Cv2.CvtColor(bw, bgr, ColorConversionCodes.GRAY2BGR);
-                        Cv2.Merge(new[] { bgr.Split()[0], bgr.Split()[1], bgr.Split()[2], alpha }, _lpWork);
+                        var chans = bgr.Split();
+                        Cv2.Merge(new[] { chans[0], chans[1], chans[2], alpha }, _lpWork);
+                        foreach (var c in chans) c.Dispose();
                     }
+
                     break;
             }
 
-            // Push _lpWork into the WriteableBitmap
             int srcStep = (int)_lpWork.Step();
             int dstStride = _lpW * 4;
             var srcBytes = new byte[srcStep * _lpH];
@@ -1182,6 +1356,7 @@ namespace PhotoMax
             {
                 Buffer.BlockCopy(srcBytes, y * srcStep, dstBytes, y * dstStride, dstStride);
             }
+
             _lpWB.WritePixels(new Int32Rect(0, 0, _lpW, _lpH), dstBytes, dstStride, 0);
         }
 
@@ -1197,7 +1372,6 @@ namespace PhotoMax
                 {
                     if (apply && _lpWork != null)
                     {
-                        // Commit preview result into the active layer
                         int step = (int)_img.Mat.Step();
                         int srcStep = (int)_lpWork.Step();
                         int h = _lpH;
@@ -1214,13 +1388,13 @@ namespace PhotoMax
                         {
                             Buffer.BlockCopy(srcBytes, y * srcStep, dstBytes, y * step, rowBytes);
                         }
+
                         Marshal.Copy(dstBytes, 0, _img.Mat.Data, dstBytes.Length);
                         _img.ForceRefreshView();
                         _hasUnsavedChanges = true;
                     }
                     else if (_lpBackupBytes != null)
                     {
-                        // Restore original layer bytes
                         Marshal.Copy(_lpBackupBytes, 0, _img.Mat.Data, _lpBackupBytes.Length);
                         _img.ForceRefreshView();
                     }
@@ -1228,20 +1402,21 @@ namespace PhotoMax
             }
             finally
             {
-                // Tear down overlay + UI
                 if (_lpOverlay != null) Artboard.Children.Remove(_lpOverlay);
                 if (_lpToolbar != null) Artboard.Children.Remove(_lpToolbar);
-                _lpOverlay = null; _lpToolbar = null;
+                _lpOverlay = null;
+                _lpToolbar = null;
                 _lpWB = null;
 
-                _lpWork?.Dispose(); _lpWork = null;
-                _lpSrc?.Dispose();  _lpSrc = null;
+                _lpWork?.Dispose();
+                _lpWork = null;
+                _lpSrc?.Dispose();
+                _lpSrc = null;
                 _lpBackupBytes = null;
                 StatusText.Content = "";
             }
         }
 
-        // ---------- Filters: hook up to XAML (Gaussian/Sobel/Binary/Otsu) ----------
         private void Filter_Gaussian_Click(object sender, RoutedEventArgs e)
         {
             if (!EnsureImageOpen()) return;
@@ -1265,16 +1440,5 @@ namespace PhotoMax
             if (!EnsureImageOpen()) return;
             StartLayerPreview("Otsu");
         }
-
-        private void Colors_BrushSize_Click(object sender, RoutedEventArgs e)
-        {
-            _brushIndex = (_brushIndex + 1) % _brushSizes.Length; // <- from MainWindow.xaml.cs
-            _eraseMode = false;
-            Text_Disarm();
-            PaintCanvas.Cursor = Cursors.None;
-            UpdateBrushPreviewVisibility(true);
-            ApplyInkBrushAttributes();
-        }
     }
 }
-//hey

@@ -243,6 +243,32 @@
                 <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
             </Style>
 
+            <!-- ========== TEXTBOX ========== -->
+            <Style TargetType="TextBox">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="Foreground" Value="{StaticResource PmTextBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource PmPanelBorderBrush}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Padding" Value="4,2"/>
+                <Setter Property="SnapsToDevicePixels" Value="True"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TextBox">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    SnapsToDevicePixels="True">
+                                <ScrollViewer x:Name="PART_ContentHost"
+                                              Background="Transparent"
+                                              Focusable="False"
+                                              HorizontalScrollBarVisibility="Hidden"
+                                              VerticalScrollBarVisibility="Hidden"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <!-- ========== SCROLLVIEWERS ========== -->
             <Style TargetType="ScrollViewer">
                 <Setter Property="Background" Value="{StaticResource PmWindowBackgroundBrush}"/>
