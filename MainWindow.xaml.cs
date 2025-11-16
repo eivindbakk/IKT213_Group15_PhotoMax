@@ -41,6 +41,9 @@ namespace PhotoMax
         private string? _currentFilePath = null;
         private bool _hasUnsavedChanges = false;
 
+        // Undo/Redo manager
+        private UndoRedoManager? _undoRedoManager;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -49,6 +52,10 @@ namespace PhotoMax
             Loaded += (_, __) =>
             {
                 _img = new ImageController(ImageView, Artboard, StatusText, PaintCanvas);
+                _undoRedoManager = new UndoRedoManager();
+                
+                // Set callback for ImageController to save undo state
+                _img.SaveUndoStateCallback = (description) => SaveUndoState(description);
 
                 RenderOptions.SetBitmapScalingMode(PaintCanvas, BitmapScalingMode.NearestNeighbor);
                 RenderOptions.SetEdgeMode(PaintCanvas, EdgeMode.Aliased);
@@ -61,6 +68,8 @@ namespace PhotoMax
                 UpdateGridBrush();
                 SetZoom(1.0, new Point(Scroller.ActualWidth / 2, Scroller.ActualHeight / 2));
                 StatusText.Content = "Ctrl+Wheel: zoom • Space/Middle: pan";
+                
+                UpdateUndoRedoMenuItems();
             };
 
             // Track changes when drawing/editing
@@ -221,5 +230,119 @@ namespace PhotoMax
         /* -------------------- BRUSH WRAPPER -------------------- */
         private void ConfigureBrush() { ApplyInkBrushAttributes(); }
         private void ImageView_Drop(object sender, DragEventArgs e) => MessageBox.Show("TODO: Drag-and-drop open.");
+
+        /* -------------------- UNDO/REDO -------------------- */
+        private void Edit_Undo_Click(object sender, RoutedEventArgs e)
+        {
+            if (_undoRedoManager == null || _img == null) return;
+            if (!_undoRedoManager.CanUndo) return;
+            
+            // Save current state to redo stack before undoing
+            var currentMat = _img.Mat;
+            if (currentMat != null && !currentMat.Empty())
+            {
+                // Get the description of what we're undoing (this will be the description of the state we're restoring)
+                var undoDesc = _undoRedoManager.GetUndoDescription();
+                
+                // Save current state to redo stack with the description of the operation we're undoing
+                var currentSnapshot = currentMat.Clone();
+                _undoRedoManager.SaveCurrentStateForRedo(currentSnapshot, undoDesc);
+            }
+            
+            // Now pop and restore the previous state
+            var state = _undoRedoManager.Undo();
+            if (state != null && state.ImageSnapshot != null && !state.ImageSnapshot.Empty())
+            {
+                // Restore the image state
+                _img.RestoreImageState(state.ImageSnapshot);
+                _hasUnsavedChanges = true;
+                UpdateUndoRedoMenuItems();
+                StatusText.Content = $"Undo: {state.Description}";
+            }
+        }
+
+        private void Edit_Redo_Click(object sender, RoutedEventArgs e)
+        {
+            if (_undoRedoManager == null || _img == null) return;
+            if (!_undoRedoManager.CanRedo) return;
+            
+            // Save current state to undo stack before redoing
+            var currentMat = _img.Mat;
+            if (currentMat != null && !currentMat.Empty())
+            {
+                // Get the description of what we're redoing (this will be the description of the state we're restoring)
+                var redoDesc = _undoRedoManager.GetRedoDescription();
+                
+                // Save current state to undo stack with the description of the operation we're redoing
+                var currentSnapshot = currentMat.Clone();
+                _undoRedoManager.SaveCurrentStateForUndo(currentSnapshot, redoDesc);
+            }
+            
+            // Now pop and restore the next state
+            var state = _undoRedoManager.Redo();
+            if (state != null && state.ImageSnapshot != null && !state.ImageSnapshot.Empty())
+            {
+                // Restore the image state
+                _img.RestoreImageState(state.ImageSnapshot);
+                _hasUnsavedChanges = true;
+                UpdateUndoRedoMenuItems();
+                StatusText.Content = $"Redo: {state.Description}";
+            }
+        }
+
+        private void UpdateUndoRedoMenuItems()
+        {
+            if (_undoRedoManager == null) return;
+            
+            UndoMenuItem.IsEnabled = _undoRedoManager.CanUndo;
+            RedoMenuItem.IsEnabled = _undoRedoManager.CanRedo;
+            
+            var undoDesc = _undoRedoManager.GetUndoDescription();
+            var redoDesc = _undoRedoManager.GetRedoDescription();
+            
+            UndoMenuItem.Header = string.IsNullOrEmpty(undoDesc) ? "_Undo" : $"_Undo: {undoDesc}";
+            RedoMenuItem.Header = string.IsNullOrEmpty(redoDesc) ? "_Redo" : $"_Redo: {redoDesc}";
+        }
+
+        /// <summary>
+        /// Saves the current state before an operation. Call this before modifying the image.
+        /// </summary>
+        internal void SaveUndoState(string description = "")
+        {
+            if (_undoRedoManager == null || _img == null) return;
+            var mat = _img.Mat;
+            if (mat != null && !mat.Empty())
+            {
+                _undoRedoManager.SaveState(mat, description);
+                UpdateUndoRedoMenuItems();
+            }
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            
+            // Handle Ctrl+Z for undo
+            if (e.Key == Key.Z && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
+                {
+                    // Ctrl+Shift+Z is redo
+                    Edit_Redo_Click(this, e);
+                }
+                else
+                {
+                    // Ctrl+Z is undo
+                    Edit_Undo_Click(this, e);
+                }
+                e.Handled = true;
+            }
+            // Handle Ctrl+Y for redo
+            else if (e.Key == Key.Y && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                Edit_Redo_Click(this, e);
+                e.Handled = true;
+            }
+        }
     }
 }

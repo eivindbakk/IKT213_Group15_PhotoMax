@@ -673,6 +673,9 @@ namespace PhotoMax
             if (mat == null || mat.Empty())
                 return false;
 
+            // Save undo state before committing shape
+            SaveUndoState("Shape");
+
             Scalar outline = new Scalar(_sh_outline.B, _sh_outline.G, _sh_outline.R, _sh_outline.A);
             Scalar fill    = new Scalar(_sh_fill.B,    _sh_fill.G,    _sh_fill.R,    _sh_fill.A);
             int thickness  = Math.Max(1, _sh_strokePx);

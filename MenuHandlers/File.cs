@@ -42,6 +42,10 @@ namespace PhotoMax
             _currentFilePath = null;
             _hasUnsavedChanges = false;
             
+            // Clear undo/redo history
+            _undoRedoManager?.Clear();
+            UpdateUndoRedoMenuItems();
+            
             StatusText.Content = "New document created";
         }
 
@@ -150,6 +154,11 @@ namespace PhotoMax
 							// Update tracking
 							_currentFilePath = dlg.FileName;
 							_hasUnsavedChanges = false;
+							
+							// Clear undo/redo history
+							_undoRedoManager?.Clear();
+							UpdateUndoRedoMenuItems();
+							
 							StatusText.Content = $"Opened: {Path.GetFileName(dlg.FileName)} ({bgra.Width}x{bgra.Height})";
 						}
 					}
