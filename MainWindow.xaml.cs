@@ -304,9 +304,7 @@ namespace PhotoMax
             RedoMenuItem.Header = string.IsNullOrEmpty(redoDesc) ? "_Redo" : $"_Redo: {redoDesc}";
         }
 
-        /// <summary>
-        /// Saves the current state before an operation. Call this before modifying the image.
-        /// </summary>
+        // Saves the current state before an operation. Call this before modifying the image.
         internal void SaveUndoState(string description = "")
         {
             if (_undoRedoManager == null || _img == null) return;
