@@ -1,6 +1,3 @@
-// File: MenuHandlers/Fun.cs
-// Fixed: Better crown placement - overlaps with top of face instead of floating above
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -35,7 +32,6 @@ namespace PhotoMax
         internal CancellationTokenSource? _filterCancellation;
         internal bool _filterProcessing = false;
 
-        // Live preview session
         internal Image? _filterOverlay;
         internal Border? _filterToolbar;
         internal WriteableBitmap? _filterWB;
@@ -46,40 +42,33 @@ namespace PhotoMax
         internal byte[]? _activeBackup;
         internal int _activeW, _activeH, _activeStride;
 
-        // Filter parameters
         internal string _filterMode = "Grayscale";
         internal double _filterAmount = 1.0;
         internal int _posterizeLevels = 4;
         internal int _pixelBlock = 8;
 
-        // Background edit
         internal Mat? _bgImage;
         internal double _bgBlurRadius = 25;
         internal double _bgSatMul = 1.0;
         internal double _bgValMul = 1.0;
 
-        // Person mask cache
         internal Mat? _cachedPersonMask;
         internal bool _maskDirty = true;
         internal int _marginPercent = 3;
         internal int _iterations = 3;
         internal int _erosion = 2;
 
-        // Crown sticker
         internal Mat? _sticker;
         internal bool _stickerTriedLoad = false;
 
-        // Session control
         internal bool _filterActive = false;
         internal DispatcherTimer? _filterTimer;
         internal bool _filterDirty;
 
-        // Cascades
         internal CascadeClassifier? _faceClassifier;
         internal CascadeClassifier? _eyeClassifier;
         internal bool _triedLoadModels = false;
 
-        // UI refs - store panels directly
         internal StackPanel? _basicFilterPanel;
         internal StackPanel? _bgPanel;
         internal StackPanel? _maskPanel;
@@ -89,14 +78,7 @@ namespace PhotoMax
         internal Slider? _bgSigmaSlider, _bgSatSlider, _bgValSlider;
         internal Slider? _marginSlider, _iterSlider, _erosionSlider;
 
-        // Quality setting for background processing
-        internal int _maskQuality = 1024; // Default: balanced (512=fast, 1024=balanced, 2048=high quality)
-
-
-        internal void Filters_CancelIfActive()
-        {
-            if (_filterActive) EndLayerFilterSession(apply: false);
-        }
+        internal int _maskQuality = 1024;
 
         public void Fun_Filters_Click(object sender, RoutedEventArgs e)
         {
@@ -113,7 +95,6 @@ namespace PhotoMax
 
             dlg.ShowDialog();
         }
-
 
         internal async void StartLayerFilterSession(Canvas board)
         {
@@ -148,22 +129,13 @@ namespace PhotoMax
 
             _filterActive = true;
 
-            // **Apply initial filter first (fast)**
             ApplyFilterAndUpdate();
-    
-            // **THEN load models in background (slow)**
+
             StatusText.Content = "Loading models...";
             await EnsureModelsLoadedAsync();
             StatusText.Content = "Ready";
         }
 
-        private void CenterFilterToolbar(Canvas board)
-        {
-            if (_filterToolbar == null) return;
-
-            Canvas.SetLeft(_filterToolbar, (board.ActualWidth - _filterToolbar.Width) / 2);
-            Canvas.SetTop(_filterToolbar, Math.Max(20, (board.ActualHeight - 700) / 2));
-        }
 
         internal void EndLayerFilterSession(bool apply)
         {
@@ -231,381 +203,6 @@ namespace PhotoMax
             _filterProcessing = false;
         }
 
-        private void OnFilter_PreviewKeyDown(object? sender, KeyEventArgs e)
-        {
-            if (!_filterActive) return;
-            if (e.Key == Key.Enter)
-            {
-                EndLayerFilterSession(apply: true);
-                e.Handled = true;
-            }
-            else if (e.Key == Key.Escape)
-            {
-                EndLayerFilterSession(apply: false);
-                e.Handled = true;
-            }
-        }
-
-        private Border BuildFilterToolbar(Canvas _)
-        {
-            var border = new Border
-            {
-                Background = new SolidColorBrush(Color.FromArgb(240, 30, 30, 30)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(255, 100, 100, 100)),
-                BorderThickness = new Thickness(2),
-                CornerRadius = new CornerRadius(12),
-                Padding = new Thickness(20),
-                Width = 480,
-                MaxHeight = 700,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Effect = new System.Windows.Media.Effects.DropShadowEffect
-                {
-                    Color = Colors.Black,
-                    Direction = 315,
-                    ShadowDepth = 8,
-                    BlurRadius = 20,
-                    Opacity = 0.7
-                }
-            };
-
-            var scrollViewer = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                MaxHeight = 650
-            };
-
-            var stack = new StackPanel { Orientation = Orientation.Vertical };
-
-            // Header with title bar style
-            var headerBorder = new Border
-            {
-                Background = new SolidColorBrush(Color.FromArgb(255, 40, 100, 160)),
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(12, 8, 12, 8),
-                Margin = new Thickness(-10, -10, -10, 16)
-            };
-
-            var headerStack = new StackPanel { Orientation = Orientation.Vertical };
-
-            var titleRow = new TextBlock
-            {
-                Text = "✨ Filters & Effects",
-                FontSize = 18,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
-
-            var subtitle = new TextBlock
-            {
-                Text = "Press Enter to apply • Esc to cancel",
-                FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 4, 0, 0)
-            };
-
-            headerStack.Children.Add(titleRow);
-            headerStack.Children.Add(subtitle);
-            headerBorder.Child = headerStack;
-            stack.Children.Add(headerBorder);
-
-            // Filter selector section
-            var selectorLabel = new TextBlock
-            {
-                Text = "Select Effect:",
-                Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)),
-                FontSize = 12,
-                FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, 0, 0, 6)
-            };
-            stack.Children.Add(selectorLabel);
-
-            _modeCombo = new ComboBox
-            {
-                ItemsSource = new[]
-                {
-                    "Grayscale",
-                    "Invert",
-                    "Sepia",
-                    "Posterize",
-                    "Pixelate",
-                    "BackgroundBlur",
-                    "BackgroundReplace",
-                    "AddCrown"
-                },
-                SelectedItem = _filterMode,
-                Width = 440,
-                Margin = new Thickness(0, 0, 0, 16),
-                Height = 32,
-                FontSize = 13,
-                Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),
-                Foreground = Brushes.White
-            };
-            _modeCombo.SelectionChanged += (s, e) =>
-            {
-                _filterMode = (string)_modeCombo.SelectedItem!;
-                UpdateExtrasVisibility();
-                _maskDirty = true;
-                _filterDirty = true;
-            };
-            stack.Children.Add(_modeCombo);
-
-            // Separator
-            stack.Children.Add(new Separator
-            {
-                Margin = new Thickness(0, 0, 0, 16),
-                Background = new SolidColorBrush(Color.FromArgb(100, 150, 150, 150))
-            });
-
-            // Basic filter controls panel
-            _basicFilterPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
-            _amtSlider = MakeSlider(_basicFilterPanel, "💫 Amount", 0, 1, _filterAmount, v =>
-            {
-                _filterAmount = v;
-                _filterDirty = true;
-            });
-            _lvlSlider = MakeSlider(_basicFilterPanel, "🎨 Levels", 2, 8, _posterizeLevels, v =>
-            {
-                _posterizeLevels = (int)Round(v);
-                _filterDirty = true;
-            });
-            _blkSlider = MakeSlider(_basicFilterPanel, "🔲 Block Size", 2, 40, _pixelBlock, v =>
-            {
-                _pixelBlock = (int)Round(v);
-                _filterDirty = true;
-            });
-            stack.Children.Add(_basicFilterPanel);
-
-            // Background controls panel
-            _bgPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
-
-            var bgHeader = new TextBlock
-            {
-                Text = "🖼️ Background Settings",
-                Foreground = new SolidColorBrush(Color.FromRgb(150, 200, 255)),
-                FontWeight = FontWeights.SemiBold,
-                FontSize = 13,
-                Margin = new Thickness(0, 0, 0, 8)
-            };
-            _bgPanel.Children.Add(bgHeader);
-
-            _btnPickBg = new Button
-            {
-                Content = "📁 Choose Background Image",
-                Margin = new Thickness(0, 0, 0, 12),
-                Padding = new Thickness(12, 8, 12, 8),
-                Width = 440,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-                Background = new SolidColorBrush(Color.FromArgb(255, 60, 60, 60)),
-                Foreground = Brushes.White,
-                FontSize = 12,
-                BorderThickness = new Thickness(1),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(255, 100, 100, 100))
-            };
-            _btnPickBg.Click += (_, __) =>
-            {
-                var ofd = new OpenFileDialog { Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp" };
-                if (ofd.ShowDialog() == true)
-                {
-                    _bgImage?.Dispose();
-                    var tmp = Cv2.ImRead(ofd.FileName, ImreadModes.Unchanged);
-                    if (!tmp.Empty())
-                    {
-                        if (tmp.Channels() == 3) Cv2.CvtColor(tmp, tmp, ColorConversionCodes.BGR2BGRA);
-                        _bgImage = tmp;
-                        _filterDirty = true;
-                        StatusText.Content = $"Loaded: {Path.GetFileName(ofd.FileName)}";
-                    }
-                }
-            };
-            _bgPanel.Children.Add(_btnPickBg);
-
-            _bgSigmaSlider = MakeSlider(_bgPanel, "🌫️ Blur Radius", 1, 80, _bgBlurRadius, v =>
-            {
-                _bgBlurRadius = v;
-                _filterDirty = true;
-            });
-            _bgSatSlider = MakeSlider(_bgPanel, "🎨 Saturation", 0, 2, _bgSatMul, v =>
-            {
-                _bgSatMul = v;
-                _filterDirty = true;
-            });
-            _bgValSlider = MakeSlider(_bgPanel, "☀️ Brightness", 0, 2, _bgValMul, v =>
-            {
-                _bgValMul = v;
-                _filterDirty = true;
-            });
-
-            stack.Children.Add(_bgPanel);
-
-            // Mask controls panel
-            _maskPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
-
-            var maskHeader = new TextBlock
-            {
-                Text = "🎯 Person Detection Settings",
-                Foreground = new SolidColorBrush(Color.FromRgb(150, 200, 255)),
-                FontWeight = FontWeights.SemiBold,
-                FontSize = 13,
-                Margin = new Thickness(0, 0, 0, 8)
-            };
-            _maskPanel.Children.Add(maskHeader);
-
-            _marginSlider = MakeSlider(_maskPanel, "   📏 Margin %", 1, 10, _marginPercent, v =>
-            {
-                _marginPercent = (int)Round(v);
-                _maskDirty = true;
-                _filterDirty = true;
-            });
-            _iterSlider = MakeSlider(_maskPanel, "   🔄 Iterations", 1, 8, _iterations, v =>
-            {
-                _iterations = (int)Round(v);
-                _maskDirty = true;
-                _filterDirty = true;
-            });
-            _erosionSlider = MakeSlider(_maskPanel, "   ✂️ Edge Cleanup", 0, 5, _erosion, v =>
-            {
-                _erosion = (int)Round(v);
-                _maskDirty = true;
-                _filterDirty = true;
-            });
-
-            stack.Children.Add(_maskPanel);
-
-            UpdateExtrasVisibility();
-
-            // Separator before buttons
-            stack.Children.Add(new Separator
-            {
-                Margin = new Thickness(0, 16, 0, 16),
-                Background = new SolidColorBrush(Color.FromArgb(100, 150, 150, 150))
-            });
-
-            // Action buttons
-            var btnPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 0, 0, 0)
-            };
-
-            var applyBtn = new Button
-            {
-                Content = "✓ Apply Filter",
-                Padding = new Thickness(24, 10, 24, 10),
-                Margin = new Thickness(0, 0, 10, 0),
-                FontWeight = FontWeights.SemiBold,
-                FontSize = 13,
-                Background = new SolidColorBrush(Color.FromRgb(40, 150, 80)),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0),
-                Cursor = Cursors.Hand
-            };
-            applyBtn.Click += (s, e) => EndLayerFilterSession(apply: true);
-
-            var cancelBtn = new Button
-            {
-                Content = "✕ Cancel",
-                Padding = new Thickness(24, 10, 24, 10),
-                FontSize = 13,
-                Background = new SolidColorBrush(Color.FromRgb(120, 40, 40)),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0),
-                Cursor = Cursors.Hand
-            };
-            cancelBtn.Click += (s, e) => EndLayerFilterSession(apply: false);
-
-            btnPanel.Children.Add(applyBtn);
-            btnPanel.Children.Add(cancelBtn);
-            stack.Children.Add(btnPanel);
-
-            scrollViewer.Content = stack;
-            border.Child = scrollViewer;
-            return border;
-        }
-
-        private Slider MakeSlider(Panel parent, string label, double min, double max, double val,
-            Action<double> onChange)
-        {
-            parent.Children.Add(new TextBlock
-            {
-                Text = label,
-                Foreground = Brushes.Gainsboro,
-                Margin = new Thickness(0, 6, 0, 2),
-                FontSize = 11
-            });
-
-            var slider = new Slider
-            {
-                Minimum = min,
-                Maximum = max,
-                Value = val,
-                Width = 360,
-                Margin = new Thickness(0, 0, 0, 4)
-            };
-            slider.ValueChanged += (_, e) => onChange(e.NewValue);
-            parent.Children.Add(slider);
-
-            return slider;
-        }
-
-        private void UpdateExtrasVisibility()
-        {
-            bool isGrayscale = _filterMode == "Grayscale";
-            bool isInvert = _filterMode == "Invert";
-            bool isSepia = _filterMode == "Sepia";
-            bool isPosterize = _filterMode == "Posterize";
-            bool isPixelate = _filterMode == "Pixelate";
-            bool bgBlur = _filterMode == "BackgroundBlur";
-            bool bgRepl = _filterMode == "BackgroundReplace";
-            bool bgAny = bgBlur || bgRepl;
-
-            // Show/hide basic filter panel items
-            if (_amtSlider != null)
-            {
-                var amtVis = (isGrayscale || isInvert || isSepia) ? Visibility.Visible : Visibility.Collapsed;
-                _amtSlider.Visibility = amtVis;
-                int idx = _basicFilterPanel!.Children.IndexOf(_amtSlider);
-                if (idx > 0 && _basicFilterPanel.Children[idx - 1] is TextBlock)
-                    _basicFilterPanel.Children[idx - 1].Visibility = amtVis;
-            }
-
-            if (_lvlSlider != null)
-            {
-                var lvlVis = isPosterize ? Visibility.Visible : Visibility.Collapsed;
-                _lvlSlider.Visibility = lvlVis;
-                int idx = _basicFilterPanel!.Children.IndexOf(_lvlSlider);
-                if (idx > 0 && _basicFilterPanel.Children[idx - 1] is TextBlock)
-                    _basicFilterPanel.Children[idx - 1].Visibility = lvlVis;
-            }
-
-            if (_blkSlider != null)
-            {
-                var blkVis = isPixelate ? Visibility.Visible : Visibility.Collapsed;
-                _blkSlider.Visibility = blkVis;
-                int idx = _basicFilterPanel!.Children.IndexOf(_blkSlider);
-                if (idx > 0 && _basicFilterPanel.Children[idx - 1] is TextBlock)
-                    _basicFilterPanel.Children[idx - 1].Visibility = blkVis;
-            }
-
-            if (_bgPanel != null) _bgPanel.Visibility = bgAny ? Visibility.Visible : Visibility.Collapsed;
-            if (_btnPickBg != null) _btnPickBg.Visibility = bgRepl ? Visibility.Visible : Visibility.Collapsed;
-
-            if (_bgSigmaSlider != null)
-            {
-                var blurVis = bgBlur ? Visibility.Visible : Visibility.Collapsed;
-                _bgSigmaSlider.Visibility = blurVis;
-                int idx = _bgPanel!.Children.IndexOf(_bgSigmaSlider);
-                if (idx > 0 && _bgPanel.Children[idx - 1] is TextBlock)
-                    _bgPanel.Children[idx - 1].Visibility = blurVis;
-            }
-
-            if (_maskPanel != null) _maskPanel.Visibility = bgAny ? Visibility.Visible : Visibility.Collapsed;
-        }
-
         private void ApplyFilterAndUpdate()
         {
             if (_filterSrc == null || _filterDst == null || _filterWB == null) return;
@@ -634,7 +231,6 @@ namespace PhotoMax
             _filterWB.WritePixels(rect, _filterDst, _fstride, 0);
         }
 
-        // ===== Classic filters =====
         private void Filter_Grayscale_PremulSafe()
         {
             var amt = _filterAmount;
@@ -787,7 +383,6 @@ namespace PhotoMax
             }
         }
 
-        // ===== Background edit =====
         private void Filter_BackgroundEdit(bool blurOnly)
         {
             if (!blurOnly && (_bgImage == null || _bgImage.Empty()))
@@ -807,7 +402,7 @@ namespace PhotoMax
                 _cachedPersonMask?.Dispose();
                 _cachedPersonMask =
                     CreateForegroundMask(mat, _marginPercent, _iterations, _erosion,
-                        _maskQuality); // **Pass quality setting**
+                        _maskQuality);
                 _maskDirty = false;
 
                 StatusText.Content = "Applying effect...";
@@ -820,7 +415,7 @@ namespace PhotoMax
                 bg = new Mat(_fh, _fw, MatType.CV_8UC4, new Scalar(0, 0, 0, 255));
                 using var fitted = new Mat();
                 Cv2.Resize(_bgImage, fitted, new CvSize(_fw, _fh), 0, 0,
-                    InterpolationFlags.Linear); // Changed from Lanczos4 to Linear (faster)
+                    InterpolationFlags.Linear);
                 fitted.CopyTo(bg);
             }
             else
@@ -829,11 +424,10 @@ namespace PhotoMax
                 int k = Math.Max(1, (int)Round(_bgBlurRadius));
                 if (k % 2 == 0) k++;
 
-                // **OPTIMIZATION: Use smaller kernel for speed**
-                int maxKernel = 31; // Limit max blur kernel size
+                int maxKernel = 31;
                 if (k > maxKernel) k = maxKernel;
 
-                Cv2.GaussianBlur(bg, bg, new CvSize(k, k), _bgBlurRadius * 0.3); // Reduce sigma for speed
+                Cv2.GaussianBlur(bg, bg, new CvSize(k, k), _bgBlurRadius * 0.3);
             }
 
             AdjustSatVal_BGRA(bg, _bgSatMul, _bgValMul);
@@ -848,7 +442,6 @@ namespace PhotoMax
             StatusText.Content = "Ready";
         }
 
-        // ===== Add Crown (improved placement) =====
         private void Filter_AddCrown()
         {
             var baseMat = MakeMatFromBGRA(_activeBackup!, _fw, _fh, _activeStride);
@@ -875,17 +468,12 @@ namespace PhotoMax
 
             var face = faces[0].Rect;
 
-            // Crown is 120% of face width
             int crownW = (int)(face.Width * 1.2);
             int crownH = (int)(_sticker.Height * (crownW / (double)_sticker.Width));
 
-            // Center horizontally on face
             int crownX = face.X + (face.Width - crownW) / 2;
 
-            // IMPROVED: Instead of placing entirely above (face.Y - crownH),
-            // overlap with the top of the face by placing it at the forehead area
-            // This makes it sit ON the head rather than floating above
-            int crownY = face.Y - (int)(crownH * 0.65); // Overlap by 35% of crown height
+            int crownY = face.Y - (int)(crownH * 0.65);
 
             using var crownScaled = new Mat();
             Cv2.Resize(_sticker, crownScaled, new CvSize(crownW, crownH), 0, 0, InterpolationFlags.Lanczos4);
@@ -900,7 +488,6 @@ namespace PhotoMax
 
         private static byte LerpByte(byte a, byte b, double t) => (byte)Math.Clamp((int)Round(a + (b - a) * t), 0, 255);
 
-        // ===== GrabCut mask =====
         private static Mat CreateForegroundMask(Mat source, int marginPercent = 3, int iterations = 3, int erosion = 2,
             int targetSize = 1024)
         {
@@ -922,7 +509,6 @@ namespace PhotoMax
                     bgr = source.Clone();
                 }
 
-                // **Use passed-in target size**
                 double scale = Math.Min(1.0, targetSize / (double)Math.Max(bgr.Width, bgr.Height));
                 Mat resized = bgr;
                 bool needsResize = scale < 0.99;
@@ -996,7 +582,6 @@ namespace PhotoMax
             }
         }
 
-        // ===== Helpers =====
         private (byte[] buf, int w, int h, int stride) SnapshotActiveLayer()
         {
             if (_img?.Mat == null || _img.Mat.Empty()) return (Array.Empty<byte>(), 0, 0, 0);
@@ -1298,7 +883,6 @@ namespace PhotoMax
 
         private static void AdjustSatVal_BGRA(Mat bgra, double satMul, double valMul)
         {
-            // **OPTIMIZATION: Skip if no adjustment needed**
             if (Math.Abs(satMul - 1.0) < 0.001 && Math.Abs(valMul - 1.0) < 0.001)
             {
                 return;
@@ -1390,7 +974,6 @@ namespace PhotoMax
         }
     }
 
-// ========== FILTER WINDOW ==========
     internal sealed class FilterWindow : WpfWindow
     {
         private readonly MainWindow _main;
@@ -1400,9 +983,8 @@ namespace PhotoMax
         private StackPanel? _basicPanel, _bgPanel, _maskPanel;
         private Slider? _amtSlider, _lvlSlider, _blkSlider;
         private Slider? _bgSigmaSlider, _bgSatSlider, _bgValSlider;
-        private Slider? _marginSlider, _iterSlider, _erosionSlider, _qualitySlider; // **Added _qualitySlider**
+        private Slider? _marginSlider, _iterSlider, _erosionSlider, _qualitySlider;
         private Button? _btnPickBg;
-
 
         public FilterWindow(MainWindow main)
         {
@@ -1419,7 +1001,6 @@ namespace PhotoMax
             Background = new SolidColorBrush(Color.FromArgb(255, 30, 30, 30));
             Foreground = new SolidColorBrush(Color.FromArgb(255, 243, 243, 243));
 
-            // **RESET TO DEFAULTS**
             _filterMode = "Grayscale";
             _main._filterMode = "Grayscale";
             _main._filterAmount = 1.0;
@@ -1436,12 +1017,10 @@ namespace PhotoMax
             _main._bgImage = null;
             _main._maskDirty = true;
 
-            // **BUILD CONTENT SYNCHRONOUSLY - this is fast**
             Content = BuildControlsPanel();
 
             ContentRendered += async (s, e) =>
             {
-                // **START FILTER SESSION AFTER WINDOW IS FULLY RENDERED**
                 var board = GetArtboard();
                 if (board != null)
                 {
@@ -1487,7 +1066,6 @@ namespace PhotoMax
 
             var stack = new StackPanel { Orientation = Orientation.Vertical };
 
-            // Header
             stack.Children.Add(new TextBlock
             {
                 Text = "FILTER SETTINGS",
@@ -1497,7 +1075,6 @@ namespace PhotoMax
                 Margin = new Thickness(0, 0, 0, 16)
             });
 
-            // Info
             stack.Children.Add(new TextBlock
             {
                 Text =
@@ -1508,7 +1085,6 @@ namespace PhotoMax
                 TextWrapping = TextWrapping.Wrap
             });
 
-            // Filter selector
             stack.Children.Add(new TextBlock
             {
                 Text = "Effect Type:",
@@ -1539,7 +1115,6 @@ namespace PhotoMax
 
             stack.Children.Add(new Separator { Margin = new Thickness(0, 0, 0, 16) });
 
-            // Basic controls
             _basicPanel = new StackPanel();
             _amtSlider = MakeSliderWithValue(_basicPanel, "Amount", 0, 1, 1.0, v =>
             {
@@ -1558,7 +1133,6 @@ namespace PhotoMax
             }, integerOnly: true);
             stack.Children.Add(_basicPanel);
 
-            // Background controls
             _bgPanel = new StackPanel { Margin = new Thickness(0, 16, 0, 0) };
             _bgPanel.Children.Add(new TextBlock
             {
@@ -1611,7 +1185,6 @@ namespace PhotoMax
             }, integerOnly: false);
             stack.Children.Add(_bgPanel);
 
-            // Mask controls
             _maskPanel = new StackPanel { Margin = new Thickness(0, 16, 0, 0) };
             _maskPanel.Children.Add(new TextBlock
             {
@@ -1659,12 +1232,10 @@ namespace PhotoMax
             }, integerOnly: true);
             stack.Children.Add(_maskPanel);
 
-            // **NOW call UpdatePanelVisibility AFTER all controls are created**
             UpdatePanelVisibility();
 
             stack.Children.Add(new Separator { Margin = new Thickness(0, 24, 0, 16) });
 
-            // Buttons
             var btnPanel = new StackPanel
                 { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             var applyBtn = new Button
@@ -1744,22 +1315,19 @@ namespace PhotoMax
             };
             Grid.SetColumn(textBox, 1);
 
-            // **ONLY UPDATE LIVE DISPLAY, DON'T TRIGGER FILTER**
             slider.ValueChanged += (_, e) =>
             {
                 double displayValue = integerOnly ? Math.Round(e.NewValue) : e.NewValue;
                 textBox.Text = integerOnly ? ((int)displayValue).ToString() : displayValue.ToString("F2");
             };
 
-            // **TRIGGER FILTER ONLY ON MOUSE UP (when user releases slider)**
             slider.PreviewMouseUp += (_, __) =>
             {
                 double finalValue = integerOnly ? Math.Round(slider.Value) : slider.Value;
-                if (integerOnly) slider.Value = finalValue; // Snap to integer
+                if (integerOnly) slider.Value = finalValue;
                 onChange(finalValue);
             };
 
-            // **ALSO TRIGGER ON KEYBOARD (arrow keys)**
             slider.PreviewKeyUp += (_, e) =>
             {
                 if (e.Key == Key.Left || e.Key == Key.Right || e.Key == Key.Up || e.Key == Key.Down)
@@ -1770,7 +1338,6 @@ namespace PhotoMax
                 }
             };
 
-            // Sync textbox -> slider (and trigger on Enter)
             textBox.KeyDown += (_, e) =>
             {
                 if (e.Key == Key.Enter)
@@ -1809,13 +1376,10 @@ namespace PhotoMax
             if (_lvlSlider != null) SetSliderVisibility(_basicPanel!, _lvlSlider, isPosterize);
             if (_blkSlider != null) SetSliderVisibility(_basicPanel!, _blkSlider, isPixelate);
 
-            // Show entire background panel for both blur and replace
             if (_bgPanel != null) _bgPanel.Visibility = bgAny ? Visibility.Visible : Visibility.Collapsed;
 
-            // Only hide/show the button itself for replace mode
             if (_btnPickBg != null) _btnPickBg.Visibility = bgRepl ? Visibility.Visible : Visibility.Collapsed;
 
-            // Hide blur slider for replace mode, show for blur mode
             if (_bgSigmaSlider != null) SetSliderVisibility(_bgPanel!, _bgSigmaSlider, bgBlur);
 
             if (_maskPanel != null) _maskPanel.Visibility = bgAny ? Visibility.Visible : Visibility.Collapsed;
@@ -1865,6 +1429,7 @@ namespace PhotoMax
                 var found = FindDescendant<T>(child);
                 if (found != null) return found;
             }
+
             return null;
         }
     }

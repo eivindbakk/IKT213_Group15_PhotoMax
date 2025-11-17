@@ -10,40 +10,40 @@
         Foreground="{StaticResource PmTextBrush}">
     <DockPanel>
 
-        <!-- TOP MENU: only File kept -->
+        <!-- TOP MENU -->
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_File">
-                <MenuItem Header="_New" Click="File_New_Click"/>
-                <Separator/>
-                <MenuItem Header="_Open..." Click="File_Open_Click"/>
-                <Separator/>
-                <MenuItem Header="_Save" Click="File_Save_Click"/>
-                <MenuItem Header="Save _As..." Click="File_SaveAs_Click"/>
-                <Separator/>
-                <MenuItem Header="_Properties" Click="File_Properties_Click"/>
-                <Separator/>
-                <MenuItem Header="_Quit" Click="File_Quit_Click"/>
+                <MenuItem Header="_New" Click="File_New_Click" />
+                <Separator />
+                <MenuItem Header="_Open..." Click="File_Open_Click" />
+                <Separator />
+                <MenuItem Header="_Save" Click="File_Save_Click" />
+                <MenuItem Header="Save _As..." Click="File_SaveAs_Click" />
+                <Separator />
+                <MenuItem Header="_Properties" Click="File_Properties_Click" />
+                <Separator />
+                <MenuItem Header="_Quit" Click="File_Quit_Click" />
             </MenuItem>
             <MenuItem Header="_Edit">
-                <MenuItem Header="_Undo" Click="Edit_Undo_Click" InputGestureText="Ctrl+Z" x:Name="UndoMenuItem"/>
-                <MenuItem Header="_Redo" Click="Edit_Redo_Click" InputGestureText="Ctrl+Y" x:Name="RedoMenuItem"/>
+                <MenuItem Header="_Undo" Click="Edit_Undo_Click" InputGestureText="Ctrl+Z" x:Name="UndoMenuItem" />
+                <MenuItem Header="_Redo" Click="Edit_Redo_Click" InputGestureText="Ctrl+Y" x:Name="RedoMenuItem" />
             </MenuItem>
         </Menu>
 
         <!-- STATUS BAR -->
         <StatusBar DockPanel.Dock="Bottom">
-            <StatusBarItem Content="Ready" x:Name="StatusText"/>
+            <StatusBarItem Content="Ready" x:Name="StatusText" />
         </StatusBar>
 
-        <!-- MAIN WORKSPACE - Grid is NOW OUTSIDE ScrollViewer -->
+        <!-- MAIN WORKSPACE -->
         <Grid x:Name="Root">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="230"/>   <!-- Left sidebar -->
-                <ColumnDefinition Width="*"/>     <!-- Center canvas -->
-                <ColumnDefinition Width="280"/>   <!-- Right sidebar -->
+                <ColumnDefinition Width="230" />   <!-- Left sidebar -->
+                <ColumnDefinition Width="*" />     <!-- Center canvas -->
+                <ColumnDefinition Width="280" />   <!-- Right sidebar -->
             </Grid.ColumnDefinitions>
 
-            <!-- ========== LEFT SIDEBAR: FIXED, NO SCROLLING ========== -->
+            <!-- LEFT SIDEBAR -->
             <Border Grid.Column="0"
                     Background="{StaticResource PmPanelBackgroundBrush}"
                     BorderBrush="{StaticResource PmPanelBorderBrush}"
@@ -56,9 +56,8 @@
                                    FontSize="10"
                                    Margin="2,0,0,4"
                                    Foreground="{StaticResource PmSubTextBrush}"
-                                   FontWeight="Bold"/>
-                        <Button x:Name="ColorSwatch"
-                                Click="Tool_ColorPicker_Click"
+                                   FontWeight="Bold" />
+                        <Button Click="Tool_ColorPicker_Click"
                                 Width="84"
                                 Height="84"
                                 Background="{StaticResource PmAccentBrush}"
@@ -69,22 +68,22 @@
                                 <TextBlock Text="🎨"
                                            FontSize="26"
                                            HorizontalAlignment="Center"
-                                           Foreground="White"/>
+                                           Foreground="White" />
                                 <TextBlock Text="Pick color"
                                            FontSize="11"
                                            HorizontalAlignment="Center"
-                                           Foreground="White"/>
+                                           Foreground="White" />
                             </StackPanel>
                         </Button>
 
-                        <Separator Margin="0,10,0,8"/>
+                        <Separator Margin="0,10,0,8" />
 
                         <!-- TOOLS -->
                         <TextBlock Text="TOOLS"
                                    FontSize="10"
                                    Margin="2,0,0,4"
                                    Foreground="{StaticResource PmSubTextBrush}"
-                                   FontWeight="Bold"/>
+                                   FontWeight="Bold" />
 
                         <StackPanel>
                             <Button Click="Tool_Brushes_Click" ToolTip="Paint brush">
@@ -92,8 +91,8 @@
                                     <TextBlock Text="✏"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Brush"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Brush" />
                                 </StackPanel>
                             </Button>
 
@@ -102,8 +101,8 @@
                                     <TextBlock Text="⌫"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Eraser"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Eraser" />
                                 </StackPanel>
                             </Button>
 
@@ -112,8 +111,8 @@
                                     <TextBlock Text="↕"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Brush size"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Brush size" />
                                 </StackPanel>
                             </Button>
 
@@ -122,8 +121,8 @@
                                     <TextBlock Text="☩"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Move tool"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Move tool" />
                                 </StackPanel>
                             </Button>
 
@@ -132,8 +131,8 @@
                                     <TextBlock Text="T"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Text box"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Text box" />
                                 </StackPanel>
                             </Button>
 
@@ -142,8 +141,8 @@
                                     <TextBlock Text="○"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Shapes"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Shapes" />
                                 </StackPanel>
                             </Button>
 
@@ -152,20 +151,20 @@
                                     <TextBlock Text="✨"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Fun filters"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Fun filters" />
                                 </StackPanel>
                             </Button>
                         </StackPanel>
 
-                        <Separator Margin="0,10,0,8"/>
+                        <Separator Margin="0,10,0,8" />
 
-                        <!-- LAYER FILTERS (Tools.cs filters) -->
+                        <!-- LAYER FILTERS -->
                         <TextBlock Text="LAYER FILTERS"
                                    FontSize="10"
                                    Margin="2,0,0,4"
                                    Foreground="{StaticResource PmSubTextBrush}"
-                                   FontWeight="Bold"/>
+                                   FontWeight="Bold" />
 
                         <StackPanel>
                             <Button Click="Filter_Gaussian_Click" ToolTip="Gaussian blur">
@@ -173,8 +172,8 @@
                                     <TextBlock Text="σ"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Gaussian"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Gaussian" />
                                 </StackPanel>
                             </Button>
 
@@ -183,8 +182,8 @@
                                     <TextBlock Text="∂"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Sobel"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Sobel" />
                                 </StackPanel>
                             </Button>
 
@@ -193,8 +192,8 @@
                                     <TextBlock Text="01"
                                                FontSize="12"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Binary"/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Binary" />
                                 </StackPanel>
                             </Button>
 
@@ -203,8 +202,8 @@
                                     <TextBlock Text="▤"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,6,0"/>
-                                    <TextBlock Text="Histogram thres."/>
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="Histogram thres." />
                                 </StackPanel>
                             </Button>
                         </StackPanel>
@@ -212,7 +211,7 @@
                 </ScrollViewer>
             </Border>
 
-            <!-- ========== CENTER: SCROLLABLE CANVAS ONLY ========== -->
+            <!-- CENTER CANVAS -->
             <ScrollViewer x:Name="Scroller"
                           Grid.Column="1"
                           HorizontalScrollBarVisibility="Auto"
@@ -226,22 +225,19 @@
                           PreviewKeyDown="Scroller_PreviewKeyDown"
                           PreviewKeyUp="Scroller_PreviewKeyUp">
 
-                <Border x:Name="Workbench"
-                        Background="{StaticResource PmWindowBackgroundBrush}"
+                <Border Background="{StaticResource PmWindowBackgroundBrush}"
                         Padding="0">
                     <Grid x:Name="Workspace"
                           HorizontalAlignment="Center"
                           VerticalAlignment="Center"
                           RenderTransformOrigin="0.5,0.5">
 
-                        <!-- ≤100% zoom -->
                         <Grid.RenderTransform>
-                            <ScaleTransform x:Name="RenderScale" ScaleX="1" ScaleY="1"/>
+                            <ScaleTransform x:Name="RenderScale" ScaleX="1" ScaleY="1" />
                         </Grid.RenderTransform>
 
-                        <!-- >100% zoom -->
                         <Grid.LayoutTransform>
-                            <ScaleTransform x:Name="LayoutScale" ScaleX="1" ScaleY="1"/>
+                            <ScaleTransform x:Name="LayoutScale" ScaleX="1" ScaleY="1" />
                         </Grid.LayoutTransform>
 
                         <!-- Artboard with drop shadow -->
@@ -251,10 +247,10 @@
                             <Border.Effect>
                                 <DropShadowEffect ShadowDepth="6"
                                                   BlurRadius="14"
-                                                  Opacity="0.7"/>
+                                                  Opacity="0.7" />
                             </Border.Effect>
 
-                            <Grid x:Name="ArtboardHost">
+                            <Grid>
                                 <Canvas x:Name="Artboard"
                                         Background="#202020"
                                         Width="1280"
@@ -264,11 +260,11 @@
                                            Height="{Binding ElementName=Artboard, Path=Height}"
                                            Stretch="Fill"
                                            AllowDrop="True"
-                                           Drop="ImageView_Drop"/>
+                                           Drop="ImageView_Drop" />
                                     <InkCanvas x:Name="PaintCanvas"
                                                Width="{Binding ElementName=Artboard, Path=Width}"
                                                Height="{Binding ElementName=Artboard, Path=Height}"
-                                               Background="Transparent"/>
+                                               Background="Transparent" />
                                 </Canvas>
 
                                 <!-- Grid overlay -->
@@ -277,14 +273,14 @@
                                            Height="{Binding ElementName=Artboard, Path=Height}"
                                            IsHitTestVisible="False"
                                            Opacity="0.8"
-                                           Visibility="Visible"/>
+                                           Visibility="Visible" />
                             </Grid>
                         </Border>
                     </Grid>
                 </Border>
             </ScrollViewer>
 
-            <!-- ========== RIGHT SIDEBAR: FIXED, NO SCROLLING ========== -->
+            <!-- RIGHT SIDEBAR -->
             <Border Grid.Column="2"
                     Background="{StaticResource PmPanelBackgroundBrush}"
                     BorderBrush="{StaticResource PmPanelBorderBrush}"
@@ -298,15 +294,15 @@
                                    FontSize="10"
                                    Margin="2,0,0,4"
                                    Foreground="{StaticResource PmSubTextBrush}"
-                                   FontWeight="Bold"/>
+                                   FontWeight="Bold" />
                         <StackPanel Orientation="Horizontal">
                             <Button Click="Select_Rect_Click" ToolTip="Rectangular selection" Margin="0,0,4,0">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="▭"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,4,0"/>
-                                    <TextBlock Text="Rect"/>
+                                               Margin="0,0,4,0" />
+                                    <TextBlock Text="Rect" />
                                 </StackPanel>
                             </Button>
                             <Button Click="Select_Lasso_Click" ToolTip="Free-form (lasso)" Margin="0,0,4,0">
@@ -314,8 +310,8 @@
                                     <TextBlock Text="◌"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,4,0"/>
-                                    <TextBlock Text="Lasso"/>
+                                               Margin="0,0,4,0" />
+                                    <TextBlock Text="Lasso" />
                                 </StackPanel>
                             </Button>
                             <Button Click="Select_Polygon_Click" ToolTip="Polygon selection">
@@ -323,8 +319,8 @@
                                     <TextBlock Text="△"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,4,0"/>
-                                    <TextBlock Text="Poly"/>
+                                               Margin="0,0,4,0" />
+                                    <TextBlock Text="Poly" />
                                 </StackPanel>
                             </Button>
                         </StackPanel>
@@ -332,128 +328,128 @@
                         <!-- Crop & Resize -->
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                             <Button Click="Image_Crop_Click" ToolTip="Crop to selection" Margin="0,0,4,0">
-                                <TextBlock Text="Crop"/>
+                                <TextBlock Text="Crop" />
                             </Button>
                             <Button Click="Image_Resize_Click" ToolTip="Resize image">
-                                <TextBlock Text="Resize"/>
+                                <TextBlock Text="Resize" />
                             </Button>
                         </StackPanel>
 
-                        <Separator Margin="0,10,0,8"/>
+                        <Separator Margin="0,10,0,8" />
 
-                        <!-- TRANSFORM (rotate/flip) -->
+                        <!-- TRANSFORM -->
                         <TextBlock Text="TRANSFORM"
                                    FontSize="10"
                                    Margin="2,0,0,4"
                                    Foreground="{StaticResource PmSubTextBrush}"
-                                   FontWeight="Bold"/>
+                                   FontWeight="Bold" />
                         <WrapPanel>
                             <Button Click="Rotate_Right_Click" ToolTip="Rotate right 90°" Margin="0,0,4,4">
-                                <TextBlock Text="⟳ 90°"/>
+                                <TextBlock Text="⟳ 90°" />
                             </Button>
                             <Button Click="Rotate_Left_Click" ToolTip="Rotate left 90°" Margin="0,0,4,4">
-                                <TextBlock Text="⟲ 90°"/>
+                                <TextBlock Text="⟲ 90°" />
                             </Button>
                             <Button Click="Flip_Vert_Click" ToolTip="Flip vertical" Margin="0,0,4,4">
-                                <TextBlock Text="Flip V"/>
+                                <TextBlock Text="Flip V" />
                             </Button>
                             <Button Click="Flip_Horiz_Click" ToolTip="Flip horizontal" Margin="0,0,4,4">
-                                <TextBlock Text="Flip H"/>
+                                <TextBlock Text="Flip H" />
                             </Button>
                         </WrapPanel>
 
-                        <Separator Margin="0,10,0,8"/>
+                        <Separator Margin="0,10,0,8" />
 
                         <!-- LAYERS -->
                         <TextBlock Text="LAYERS"
                                    FontSize="10"
                                    Margin="2,0,0,4"
                                    Foreground="{StaticResource PmSubTextBrush}"
-                                   FontWeight="Bold"/>
+                                   FontWeight="Bold" />
                         <WrapPanel>
                             <Button Click="Layers_New_Click" ToolTip="New layer" Margin="0,0,4,4">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="+"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
-                                               Margin="0,0,4,0"/>
-                                    <TextBlock Text="New"/>
+                                               Margin="0,0,4,0" />
+                                    <TextBlock Text="New" />
                                 </StackPanel>
                             </Button>
                             <Button Click="Layers_Load_Click" ToolTip="Load layer" Margin="0,0,4,4">
-                                <TextBlock Text="Load"/>
+                                <TextBlock Text="Load" />
                             </Button>
                             <Button Click="Layers_Edit_Click" ToolTip="Edit layer" Margin="0,0,4,4">
-                                <TextBlock Text="Edit"/>
+                                <TextBlock Text="Edit" />
                             </Button>
                             <Button Click="Layers_Select_Click" ToolTip="Select layer" Margin="0,0,4,4">
-                                <TextBlock Text="Select"/>
+                                <TextBlock Text="Select" />
                             </Button>
                             <Button Click="Layers_Rename_Click" ToolTip="Rename layer" Margin="0,0,4,4">
-                                <TextBlock Text="Rename"/>
+                                <TextBlock Text="Rename" />
                             </Button>
                             <Button Click="Layers_Delete_Click" ToolTip="Delete layer" Margin="0,0,4,4">
-                                <TextBlock Text="Delete"/>
+                                <TextBlock Text="Delete" />
                             </Button>
                         </WrapPanel>
 
-                        <Separator Margin="0,10,0,8"/>
+                        <Separator Margin="0,10,0,8" />
 
                         <!-- GRID -->
                         <TextBlock Text="GRID"
                                    FontSize="10"
                                    Margin="2,0,0,4"
                                    Foreground="{StaticResource PmSubTextBrush}"
-                                   FontWeight="Bold"/>
+                                   FontWeight="Bold" />
                         <StackPanel Orientation="Horizontal">
                             <Button Click="View_ToggleGrid_Click" ToolTip="Toggle grid" Margin="0,0,4,0">
-                                <TextBlock Text="Toggle"/>
+                                <TextBlock Text="Toggle" />
                             </Button>
                             <Button Click="View_GridSettings_Click" ToolTip="Grid settings">
-                                <TextBlock Text="Settings"/>
+                                <TextBlock Text="Settings" />
                             </Button>
                         </StackPanel>
 
-                        <Separator Margin="0,10,0,8"/>
+                        <Separator Margin="0,10,0,8" />
 
                         <!-- CLIPBOARD -->
                         <TextBlock Text="CLIPBOARD"
                                    FontSize="10"
                                    Margin="2,0,0,4"
                                    Foreground="{StaticResource PmSubTextBrush}"
-                                   FontWeight="Bold"/>
+                                   FontWeight="Bold" />
                         <StackPanel Orientation="Horizontal">
                             <Button Click="Clipboard_Copy_Click" ToolTip="Copy" Margin="0,0,4,0">
-                                <TextBlock Text="Copy"/>
+                                <TextBlock Text="Copy" />
                             </Button>
                             <Button Click="Clipboard_Cut_Click" ToolTip="Cut" Margin="0,0,4,0">
-                                <TextBlock Text="Cut"/>
+                                <TextBlock Text="Cut" />
                             </Button>
                             <Button Click="Clipboard_Paste_Click" ToolTip="Paste">
-                                <TextBlock Text="Paste"/>
+                                <TextBlock Text="Paste" />
                             </Button>
                         </StackPanel>
 
-                        <Separator Margin="0,10,0,8"/>
+                        <Separator Margin="0,10,0,8" />
 
                         <!-- ZOOM -->
                         <TextBlock Text="ZOOM"
                                    FontSize="10"
                                    Margin="2,0,0,4"
                                    Foreground="{StaticResource PmSubTextBrush}"
-                                   FontWeight="Bold"/>
+                                   FontWeight="Bold" />
                         <StackPanel Orientation="Horizontal">
                             <Button Click="Zoom_Out_Click" ToolTip="Zoom out" Margin="0,0,4,0">
-                                <TextBlock Text="-"/>
+                                <TextBlock Text="-" />
                             </Button>
                             <Button Click="Zoom_100_Click" ToolTip="Zoom 100%" Margin="0,0,4,0">
-                                <TextBlock Text="100%"/>
+                                <TextBlock Text="100%" />
                             </Button>
                             <Button Click="Zoom_In_Click" ToolTip="Zoom in" Margin="0,0,4,0">
-                                <TextBlock Text="+"/>
+                                <TextBlock Text="+" />
                             </Button>
                             <Button Click="Zoom_Fit_Click" ToolTip="Zoom to fit">
-                                <TextBlock Text="Fit"/>
+                                <TextBlock Text="Fit" />
                             </Button>
                         </StackPanel>
 

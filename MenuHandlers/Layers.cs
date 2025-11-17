@@ -1,40 +1,30 @@
-// File: MenuHandlers/Layers.cs
-// Minimal raster layer system for PhotoMax.
-// - Normal blend only
-// - Active layer editing (brush, shapes, text all go to active layer via ImageController.Mat)
-// - Composite shown in ImageView via ImageController.RefreshView()
-// - Transforms (rotate/flip/resize/crop) apply to all layers
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;  // **ADD THIS**
+using System.Windows.Media;
 using Microsoft.Win32;
 using OpenCvSharp;
-
-// Alias to disambiguate from OpenCvSharp.Window
 using WWindow = System.Windows.Window;
 
 namespace PhotoMax
 {
     public sealed class Layer : IDisposable
     {
-        // internal setter so the stack can replace Mats on transforms/crop/resize.
-        public Mat Mat { get; internal set; }    // CV_8UC4 (BGRA)
+        public Mat Mat { get; internal set; }
         public string Name { get; set; }
         public bool Visible { get; set; } = true;
 
-        public int Width  => Mat?.Cols ?? 0;
+        public int Width => Mat?.Cols ?? 0;
         public int Height => Mat?.Rows ?? 0;
 
         public Layer(int w, int h, string name, bool opaqueWhite = false)
         {
             Mat = new Mat(h, w, MatType.CV_8UC4);
             if (opaqueWhite) Mat.SetTo(new Scalar(255, 255, 255, 255));
-            else             Mat.SetTo(new Scalar(0, 0, 0, 0)); // transparent
+            else Mat.SetTo(new Scalar(0, 0, 0, 0));
             Name = name;
         }
 
@@ -60,12 +50,14 @@ namespace PhotoMax
                 Cv2.CvtColor(src, d, ColorConversionCodes.BGR2BGRA);
                 return d;
             }
+
             if (src.Type() == MatType.CV_8UC1)
             {
                 var d = new Mat();
                 Cv2.CvtColor(src, d, ColorConversionCodes.GRAY2BGRA);
                 return d;
             }
+
             throw new NotSupportedException($"Unsupported Mat type: {src.Type()}");
         }
     }
@@ -73,25 +65,18 @@ namespace PhotoMax
     public sealed class LayerStack : IDisposable
     {
         public List<Layer> Layers { get; } = new();
-        public int ActiveIndex { get; private set; } = 0;
+        public int ActiveIndex { get; private set; }
 
         public Layer Active => Layers[Math.Clamp(ActiveIndex, 0, Math.Max(0, Layers.Count - 1))];
         public Mat ActiveMat => Active.Mat;
 
-        public int Width  => Layers.Count == 0 ? 0 : Layers[0].Width;
+        public int Width => Layers.Count == 0 ? 0 : Layers[0].Width;
         public int Height => Layers.Count == 0 ? 0 : Layers[0].Height;
 
         public void Dispose()
         {
             foreach (var l in Layers) l.Dispose();
             Layers.Clear();
-        }
-
-        public void InitNew(int w, int h)
-        {
-            Dispose();
-            Layers.Add(new Layer(w, h, "Background", opaqueWhite: true));
-            ActiveIndex = 0;
         }
 
         public void SetSingleFromMat(Mat src, string? name = null)
@@ -117,16 +102,19 @@ namespace PhotoMax
             if (resizeToDoc && (bgra.Cols != Width || bgra.Rows != Height))
             {
                 mat = new Mat();
-                var mode = (bgra.Cols > Width || bgra.Rows > Height) ? InterpolationFlags.Area : InterpolationFlags.Nearest;
+                var mode = (bgra.Cols > Width || bgra.Rows > Height)
+                    ? InterpolationFlags.Area
+                    : InterpolationFlags.Nearest;
                 Cv2.Resize(bgra, mat, new OpenCvSharp.Size(Width, Height), 0, 0, mode);
             }
+
             Layers.Add(new Layer(mat, name ?? $"Layer {Layers.Count}"));
             ActiveIndex = Layers.Count - 1;
         }
 
         public void DeleteActive()
         {
-            if (Layers.Count <= 1) return; // keep background
+            if (Layers.Count <= 1) return;
             Active.Mat.Dispose();
             Layers.RemoveAt(ActiveIndex);
             ActiveIndex = Math.Clamp(ActiveIndex, 0, Layers.Count - 1);
@@ -136,7 +124,6 @@ namespace PhotoMax
         public void Select(int index) => ActiveIndex = Math.Clamp(index, 0, Layers.Count - 1);
         public void ToggleActiveVisibility() => Active.Visible = !Active.Visible;
 
-        // ----- transforms on all layers -----
         public void RotateRight90()
         {
             foreach (var l in Layers)
@@ -147,6 +134,7 @@ namespace PhotoMax
                 l.Mat = d;
             }
         }
+
         public void RotateLeft90()
         {
             foreach (var l in Layers)
@@ -157,6 +145,7 @@ namespace PhotoMax
                 l.Mat = d;
             }
         }
+
         public void FlipHorizontal()
         {
             foreach (var l in Layers)
@@ -167,6 +156,7 @@ namespace PhotoMax
                 l.Mat = d;
             }
         }
+
         public void FlipVertical()
         {
             foreach (var l in Layers)
@@ -177,6 +167,7 @@ namespace PhotoMax
                 l.Mat = d;
             }
         }
+
         public void ResizeTo(int newW, int newH, InterpolationFlags mode)
         {
             foreach (var l in Layers)
@@ -187,12 +178,13 @@ namespace PhotoMax
                 l.Mat = d;
             }
         }
+
         public void Crop(int x, int y, int width, int height)
         {
             var rect = new OpenCvSharp.Rect(
                 Math.Clamp(x, 0, Math.Max(0, Width - 1)),
                 Math.Clamp(y, 0, Math.Max(0, Height - 1)),
-                Math.Clamp(width,  1, Math.Max(1, Width  - x)),
+                Math.Clamp(width, 1, Math.Max(1, Width - x)),
                 Math.Clamp(height, 1, Math.Max(1, Height - y)));
             foreach (var l in Layers)
             {
@@ -203,20 +195,18 @@ namespace PhotoMax
             }
         }
 
-        // ----- composite (normal blend in stack order) -----
-        // ----- composite (normal blend in stack order) -----
         public Mat Composite()
         {
             if (Layers.Count == 0) return new Mat();
             var dst = new Mat(Height, Width, MatType.CV_8UC4);
-    
-            // **FIX: Start with white background instead of black**
-            dst.SetTo(new Scalar(255, 255, 255, 255)); // White opaque background
-    
+
+            dst.SetTo(new Scalar(255, 255, 255, 255));
+
             foreach (var l in Layers)
-                if (l.Visible) AlphaBlendOver(dst, l.Mat);
-    
-            MakeOpaque(dst); // keep final view opaque (matches previous behaviour)
+                if (l.Visible)
+                    AlphaBlendOver(dst, l.Mat);
+
+            MakeOpaque(dst);
             return dst;
         }
 
@@ -243,6 +233,7 @@ namespace PhotoMax
                     dArr[di + 3] = 255;
                 }
             }
+
             System.Runtime.InteropServices.Marshal.Copy(dArr, 0, dst.Data, dArr.Length);
         }
 
@@ -256,24 +247,33 @@ namespace PhotoMax
                 int row = y * step;
                 for (int x = 0; x < m.Cols; x++) data[row + x * 4 + 3] = 255;
             }
+
             System.Runtime.InteropServices.Marshal.Copy(data, 0, m.Data, data.Length);
         }
     }
 
     public partial class MainWindow
     {
-        // ----- Menu handlers (wired in your XAML) -----
-
         private void Layers_New_Click(object sender, RoutedEventArgs e)
         {
-            if (_img == null) { MessageBox.Show("Open or create an image first."); return; }
+            if (_img == null)
+            {
+                MessageBox.Show("Open or create an image first.");
+                return;
+            }
+
             _img.Layers_AddBlank();
             StatusText.Content = $"Added layer '{_img.Layers_ActiveName}'";
         }
 
         private void Layers_Load_Click(object sender, RoutedEventArgs e)
         {
-            if (_img == null) { MessageBox.Show("Open or create an image first."); return; }
+            if (_img == null)
+            {
+                MessageBox.Show("Open or create an image first.");
+                return;
+            }
+
             var dlg = new OpenFileDialog { Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff" };
             if (dlg.ShowDialog() == true)
             {
@@ -282,7 +282,6 @@ namespace PhotoMax
             }
         }
 
-        // “Edit Layer” dialog: rename + optional “toggle visibility now”
         private void Layers_Edit_Click(object sender, RoutedEventArgs e)
         {
             if (_img == null) return;
@@ -303,14 +302,15 @@ namespace PhotoMax
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             var namePanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-            namePanel.Children.Add(new TextBlock { Text = "Name:", VerticalAlignment = VerticalAlignment.Center, Width = 70 });
+            namePanel.Children.Add(new TextBlock
+                { Text = "Name:", VerticalAlignment = VerticalAlignment.Center, Width = 70 });
             var nameBox = new TextBox { Text = _img.Layers_ActiveName, MinWidth = 180 };
             namePanel.Children.Add(nameBox);
 
-            // Stateless checkbox: applies a single toggle if checked.
             var toggleNow = new CheckBox { Content = "Toggle visibility now", Margin = new Thickness(0, 0, 0, 8) };
 
-            var btnPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var btnPanel = new StackPanel
+                { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             var ok = new Button { Content = "OK", Width = 70, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
             var cancel = new Button { Content = "Cancel", Width = 70, IsCancel = true };
             btnPanel.Children.Add(ok);
@@ -370,7 +370,7 @@ namespace PhotoMax
         private void Layers_Rename_Click(object sender, RoutedEventArgs e)
         {
             if (_img == null) return;
-    
+
             var dlg = new LayerRenameWindow(_img.Layers_ActiveName)
             {
                 Owner = this
@@ -383,253 +383,248 @@ namespace PhotoMax
             }
         }
     }
-    // ========== LAYER SELECT WINDOW ==========
-internal sealed class LayerSelectWindow : WWindow
-{
-    public int SelectedIndex { get; private set; }
-    
-    private readonly ListBox _layerList;
 
-    public LayerSelectWindow(int currentIndex, List<string> layerNames)
+    internal sealed class LayerSelectWindow : WWindow
     {
-        SelectedIndex = currentIndex;
+        public int SelectedIndex { get; private set; }
 
-        Title = "Select Layer";
-        Width = 400;
-        Height = 450;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        ResizeMode = ResizeMode.NoResize;
-        
-        Background = new SolidColorBrush(Color.FromArgb(255, 30, 30, 30));
-        Foreground = new SolidColorBrush(Color.FromArgb(255, 243, 243, 243));
+        private readonly ListBox _layerList;
 
-        var mainGrid = new Grid { Margin = new Thickness(20) };
-        mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        // Header
-        var header = new TextBlock
+        public LayerSelectWindow(int currentIndex, List<string> layerNames)
         {
-            Text = "LAYERS",
-            FontSize = 11,
-            FontWeight = FontWeights.Bold,
-            Foreground = new SolidColorBrush(Color.FromArgb(255, 176, 176, 176)),
-            Margin = new Thickness(0, 0, 0, 12)
-        };
-        Grid.SetRow(header, 0);
+            SelectedIndex = currentIndex;
 
-        // Layer list
-        _layerList = new ListBox
-        {
-            Background = new SolidColorBrush(Color.FromArgb(255, 45, 45, 45)),
-            Foreground = Foreground,
-            BorderBrush = new SolidColorBrush(Color.FromArgb(255, 63, 63, 70)),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(4),
-            FontSize = 13,
-            SelectionMode = SelectionMode.Single
-        };
+            Title = "Select Layer";
+            Width = 400;
+            Height = 450;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            ResizeMode = ResizeMode.NoResize;
 
-        // Populate with layer items
-        for (int i = layerNames.Count - 1; i >= 0; i--) // Top to bottom (reverse order)
-        {
-            var layer = layerNames[i];
-            var item = new LayerListItem(i, layer, i == currentIndex);
-            _layerList.Items.Add(item);
-            
-            if (i == currentIndex)
+            Background = new SolidColorBrush(Color.FromArgb(255, 30, 30, 30));
+            Foreground = new SolidColorBrush(Color.FromArgb(255, 243, 243, 243));
+
+            var mainGrid = new Grid { Margin = new Thickness(20) };
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new TextBlock
             {
-                _layerList.SelectedItem = item;
-            }
-        }
+                Text = "LAYERS",
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 176, 176, 176)),
+                Margin = new Thickness(0, 0, 0, 12)
+            };
+            Grid.SetRow(header, 0);
 
-        _layerList.SelectionChanged += (s, e) =>
-        {
-            if (_layerList.SelectedItem is LayerListItem item)
+            _layerList = new ListBox
             {
-                SelectedIndex = item.Index;
-            }
-        };
+                Background = new SolidColorBrush(Color.FromArgb(255, 45, 45, 45)),
+                Foreground = Foreground,
+                BorderBrush = new SolidColorBrush(Color.FromArgb(255, 63, 63, 70)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(4),
+                FontSize = 13,
+                SelectionMode = SelectionMode.Single
+            };
 
-        // Double-click to confirm
-        _layerList.MouseDoubleClick += (s, e) =>
-        {
-            if (_layerList.SelectedItem != null)
+            for (int i = layerNames.Count - 1; i >= 0; i--)
+            {
+                var layer = layerNames[i];
+                var item = new LayerListItem(i, layer, i == currentIndex);
+                _layerList.Items.Add(item);
+
+                if (i == currentIndex)
+                {
+                    _layerList.SelectedItem = item;
+                }
+            }
+
+            _layerList.SelectionChanged += (s, e) =>
+            {
+                if (_layerList.SelectedItem is LayerListItem item)
+                {
+                    SelectedIndex = item.Index;
+                }
+            };
+
+            _layerList.MouseDoubleClick += (s, e) =>
+            {
+                if (_layerList.SelectedItem != null)
+                {
+                    DialogResult = true;
+                    Close();
+                }
+            };
+
+            Grid.SetRow(_layerList, 1);
+
+            var infoText = new TextBlock
+            {
+                Text = "Double-click to select, or click OK",
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 150, 150, 150)),
+                Margin = new Thickness(0, 12, 0, 12),
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            Grid.SetRow(infoText, 1);
+            infoText.VerticalAlignment = VerticalAlignment.Bottom;
+
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 20, 0, 0)
+            };
+
+            var okBtn = new Button
+            {
+                Content = "OK",
+                Width = 80,
+                Padding = new Thickness(12, 6, 12, 6),
+                Margin = new Thickness(0, 0, 8, 0),
+                IsDefault = true
+            };
+            okBtn.Click += (s, e) =>
             {
                 DialogResult = true;
                 Close();
-            }
-        };
+            };
 
-        Grid.SetRow(_layerList, 1);
-
-        // Info text
-        var infoText = new TextBlock
-        {
-            Text = "Double-click to select, or click OK",
-            FontSize = 10,
-            Foreground = new SolidColorBrush(Color.FromArgb(255, 150, 150, 150)),
-            Margin = new Thickness(0, 12, 0, 12),
-            HorizontalAlignment = HorizontalAlignment.Center
-        };
-        Grid.SetRow(infoText, 1);
-        infoText.VerticalAlignment = VerticalAlignment.Bottom;
-
-        // Buttons
-        var buttonPanel = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 20, 0, 0)
-        };
-
-        var okBtn = new Button
-        {
-            Content = "OK",
-            Width = 80,
-            Padding = new Thickness(12, 6, 12, 6),
-            Margin = new Thickness(0, 0, 8, 0),
-            IsDefault = true
-        };
-        okBtn.Click += (s, e) => { DialogResult = true; Close(); };
-
-        var cancelBtn = new Button
-        {
-            Content = "Cancel",
-            Width = 80,
-            Padding = new Thickness(12, 6, 12, 6),
-            IsCancel = true
-        };
-
-        buttonPanel.Children.Add(okBtn);
-        buttonPanel.Children.Add(cancelBtn);
-        Grid.SetRow(buttonPanel, 2);
-
-        mainGrid.Children.Add(header);
-        mainGrid.Children.Add(_layerList);
-        mainGrid.Children.Add(infoText);
-        mainGrid.Children.Add(buttonPanel);
-
-        Content = mainGrid;
-        
-        // Focus the list for keyboard navigation
-        Loaded += (s, e) => _layerList.Focus();
-    }
-
-    // Custom item for rich display
-    private class LayerListItem
-    {
-        public int Index { get; }
-        public string Name { get; }
-        public bool IsActive { get; }
-
-        public LayerListItem(int index, string name, bool isActive)
-        {
-            Index = index;
-            Name = name;
-            IsActive = isActive;
-        }
-
-        public override string ToString()
-        {
-            var active = IsActive ? " ★" : "";
-            return $"[{Index}] {Name}{active}";
-        }
-    }
-}
-// ========== LAYER RENAME WINDOW ==========
-internal sealed class LayerRenameWindow : WWindow
-{
-    public string NewName { get; private set; }
-
-    public LayerRenameWindow(string currentName)
-    {
-        NewName = currentName;
-
-        Title = "Rename Layer";
-        Width = 320;
-        Height = 150;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        ResizeMode = ResizeMode.NoResize;
-
-        // **DARK THEME - matching Edit dialog**
-        Background = new SolidColorBrush(Color.FromArgb(255, 30, 30, 30));
-
-        var root = new Grid { Margin = new Thickness(12) };
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-
-        var namePanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-        
-        var label = new TextBlock 
-        { 
-            Text = "Name:", 
-            VerticalAlignment = VerticalAlignment.Center, 
-            Width = 70,
-            Foreground = Brushes.White  // **WHITE TEXT**
-        };
-        namePanel.Children.Add(label);
-        
-        var nameBox = new TextBox 
-        { 
-            Text = currentName, 
-            MinWidth = 180,
-            Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),  // **DARK INPUT**
-            Foreground = Brushes.White,  // **WHITE TEXT**
-            BorderBrush = new SolidColorBrush(Color.FromArgb(255, 70, 70, 70)),
-            CaretBrush = Brushes.White
-        };
-        namePanel.Children.Add(nameBox);
-
-        var btnPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        
-        var ok = new Button 
-        { 
-            Content = "OK", 
-            Width = 70, 
-            Margin = new Thickness(0, 0, 8, 0), 
-            IsDefault = true,
-            Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),  // **DARK BUTTON**
-            Foreground = Brushes.White
-        };
-        
-        var cancel = new Button 
-        { 
-            Content = "Cancel", 
-            Width = 70, 
-            IsCancel = true,
-            Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),  // **DARK BUTTON**
-            Foreground = Brushes.White
-        };
-        
-        btnPanel.Children.Add(ok);
-        btnPanel.Children.Add(cancel);
-
-        Grid.SetRow(namePanel, 0);
-        Grid.SetRow(btnPanel, 1);
-        root.Children.Add(namePanel);
-        root.Children.Add(btnPanel);
-
-        Content = root;
-
-        ok.Click += (_, __) =>
-        {
-            var trimmed = nameBox.Text?.Trim();
-            if (!string.IsNullOrWhiteSpace(trimmed))
+            var cancelBtn = new Button
             {
-                NewName = trimmed;
-                DialogResult = true;
-                Close();
-            }
-        };
+                Content = "Cancel",
+                Width = 80,
+                Padding = new Thickness(12, 6, 12, 6),
+                IsCancel = true
+            };
 
-        // Focus and select all for easy editing
-        Loaded += (s, e) =>
+            buttonPanel.Children.Add(okBtn);
+            buttonPanel.Children.Add(cancelBtn);
+            Grid.SetRow(buttonPanel, 2);
+
+            mainGrid.Children.Add(header);
+            mainGrid.Children.Add(_layerList);
+            mainGrid.Children.Add(infoText);
+            mainGrid.Children.Add(buttonPanel);
+
+            Content = mainGrid;
+
+            Loaded += (s, e) => _layerList.Focus();
+        }
+
+        private class LayerListItem
         {
-            nameBox.Focus();
-            nameBox.SelectAll();
-        };
+            public int Index { get; }
+            public string Name { get; }
+            public bool IsActive { get; }
+
+            public LayerListItem(int index, string name, bool isActive)
+            {
+                Index = index;
+                Name = name;
+                IsActive = isActive;
+            }
+
+            public override string ToString()
+            {
+                var active = IsActive ? " ★" : "";
+                return $"[{Index}] {Name}{active}";
+            }
+        }
     }
-}
+
+    internal sealed class LayerRenameWindow : WWindow
+    {
+        public string NewName { get; private set; }
+
+        public LayerRenameWindow(string currentName)
+        {
+            NewName = currentName;
+
+            Title = "Rename Layer";
+            Width = 320;
+            Height = 150;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            ResizeMode = ResizeMode.NoResize;
+
+            Background = new SolidColorBrush(Color.FromArgb(255, 30, 30, 30));
+
+            var root = new Grid { Margin = new Thickness(12) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var namePanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+
+            var label = new TextBlock
+            {
+                Text = "Name:",
+                VerticalAlignment = VerticalAlignment.Center,
+                Width = 70,
+                Foreground = Brushes.White
+            };
+            namePanel.Children.Add(label);
+
+            var nameBox = new TextBox
+            {
+                Text = currentName,
+                MinWidth = 180,
+                Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),
+                Foreground = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromArgb(255, 70, 70, 70)),
+                CaretBrush = Brushes.White
+            };
+            namePanel.Children.Add(nameBox);
+
+            var btnPanel = new StackPanel
+                { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+
+            var ok = new Button
+            {
+                Content = "OK",
+                Width = 70,
+                Margin = new Thickness(0, 0, 8, 0),
+                IsDefault = true,
+                Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),
+                Foreground = Brushes.White
+            };
+
+            var cancel = new Button
+            {
+                Content = "Cancel",
+                Width = 70,
+                IsCancel = true,
+                Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),
+                Foreground = Brushes.White
+            };
+
+            btnPanel.Children.Add(ok);
+            btnPanel.Children.Add(cancel);
+
+            Grid.SetRow(namePanel, 0);
+            Grid.SetRow(btnPanel, 1);
+            root.Children.Add(namePanel);
+            root.Children.Add(btnPanel);
+
+            Content = root;
+
+            ok.Click += (_, __) =>
+            {
+                var trimmed = nameBox.Text?.Trim();
+                if (!string.IsNullOrWhiteSpace(trimmed))
+                {
+                    NewName = trimmed;
+                    DialogResult = true;
+                    Close();
+                }
+            };
+
+            Loaded += (s, e) =>
+            {
+                nameBox.Focus();
+                nameBox.SelectAll();
+            };
+        }
+    }
 }

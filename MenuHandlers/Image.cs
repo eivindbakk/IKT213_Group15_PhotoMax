@@ -1,5 +1,3 @@
-// File: MenuHandlers/Image.cs
-
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -12,8 +10,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
-
-// ---- Aliases to avoid clashes with OpenCvSharp ----
 using WWindow = System.Windows.Window;
 using WPoint = System.Windows.Point;
 using WRect = System.Windows.Rect;
@@ -24,16 +20,10 @@ using OpenCvSharp;
 
 namespace PhotoMax
 {
-    /// <summary>
-    /// OpenCvSharp-backed image (BGRA 8-bit for WPF interop).
-    /// </summary>
     public partial class MainWindow
     {
-        // ---- Image menu handlers (thin forwarders to ImageController) ----
-
         private void Select_Rect_Click(object sender, RoutedEventArgs e)
         {
-            // **FIX: Disarm shapes tool first**
             Shapes_Disarm();
 
             if (_img?.SelectionFill != null || (_img?.IsFloatingActive == true))
@@ -48,7 +38,6 @@ namespace PhotoMax
 
         private void Select_Lasso_Click(object sender, RoutedEventArgs e)
         {
-            // **FIX: Disarm shapes tool first**
             Shapes_Disarm();
 
             if (_img?.SelectionFill != null || (_img?.IsFloatingActive == true))
@@ -63,7 +52,6 @@ namespace PhotoMax
 
         private void Select_Polygon_Click(object sender, RoutedEventArgs e)
         {
-            // **FIX: Disarm shapes tool first**
             Shapes_Disarm();
 
             if (_img?.SelectionFill != null || (_img?.IsFloatingActive == true))
@@ -79,14 +67,14 @@ namespace PhotoMax
         private void Image_Crop_Click(object sender, RoutedEventArgs e)
         {
             if (_img == null) return;
-            // SaveUndoState will be called inside ApplyCropFromRect when crop is applied
+
             _img.CropCommand();
         }
 
         private void Image_Resize_Click(object sender, RoutedEventArgs e)
         {
             if (_img == null) return;
-            // SaveUndoState will be called inside ResizeWithDialog after dialog confirmation
+
             _img.ResizeWithDialog(this);
         }
 
@@ -117,21 +105,11 @@ namespace PhotoMax
             SaveUndoState("Flip Horizontal");
             _img.FlipHorizontal();
         }
-
-        // ---- Selection mini-tab (like Filters) ----
-        private void Selection_PaintInside_Click(object sender, RoutedEventArgs e)
-            => _img?.EnableSelectionPaintMode();
-
-        private void Selection_Move_Click(object sender, RoutedEventArgs e)
-            => _img?.BeginMoveSelectedArea();
-
-        private void Selection_Copy_Click(object sender, RoutedEventArgs e)
-            => _img?.CopySelectionToClipboard();
     }
 
     public sealed class ImageDoc : IDisposable
     {
-        public Mat Image { get; private set; } // CV_8UC4 (BGRA)
+        public Mat Image { get; private set; }
         public int Width => Image?.Width ?? 0;
         public int Height => Image?.Height ?? 0;
 
@@ -153,8 +131,6 @@ namespace PhotoMax
             old?.Dispose();
         }
 
-        /* ---------- WPF <-> Mat ---------- */
-
         public BitmapSource ToBitmapSource()
         {
             if (Image is null || Image.Empty()) throw new InvalidOperationException("Image is empty.");
@@ -169,7 +145,6 @@ namespace PhotoMax
 
             int w = src.Width, h = src.Height, stride = w * 4;
 
-            // **FIX: Copy to managed array to bypass color management**
             var pixels = new byte[stride * h];
             Marshal.Copy(src.Data, pixels, 0, pixels.Length);
 
@@ -179,107 +154,29 @@ namespace PhotoMax
             if (!ReferenceEquals(src, Image)) src.Dispose();
             return bmp;
         }
-
-        public void FromBitmapSource(BitmapSource bmp)
-        {
-            var fmt = bmp.Format == PixelFormats.Bgra32
-                ? bmp
-                : new FormatConvertedBitmap(bmp, PixelFormats.Bgra32, null, 0);
-            int w = fmt.PixelWidth, h = fmt.PixelHeight, stride = w * 4;
-
-            var data = new byte[stride * h];
-            fmt.CopyPixels(data, stride, 0);
-
-            var mat = new Mat(h, w, MatType.CV_8UC4);
-            Marshal.Copy(data, 0, mat.Data, data.Length);
-            ReplaceWith(mat);
-        }
-
-        /* ---------- Geometry ops ---------- */
-
-        public void ResizeTo(int newWidth, int newHeight, InterpolationFlags mode)
-        {
-            var outMat = new Mat();
-            Cv2.Resize(Image, outMat, new OcvSize(newWidth, newHeight), 0, 0, mode);
-            ReplaceWith(outMat);
-        }
-
-        public void RotateRight90()
-        {
-            var outMat = new Mat();
-            Cv2.Rotate(Image, outMat, RotateFlags.Rotate90Clockwise);
-            ReplaceWith(outMat);
-        }
-
-        public void RotateLeft90()
-        {
-            var outMat = new Mat();
-            Cv2.Rotate(Image, outMat, RotateFlags.Rotate90Counterclockwise);
-            ReplaceWith(outMat);
-        }
-
-        public void FlipHorizontal()
-        {
-            var outMat = new Mat();
-            Cv2.Flip(Image, outMat, FlipMode.Y);
-            ReplaceWith(outMat);
-        }
-
-        public void FlipVertical()
-        {
-            var outMat = new Mat();
-            Cv2.Flip(Image, outMat, FlipMode.X);
-            ReplaceWith(outMat);
-        }
-
-        public void Crop(int x, int y, int width, int height)
-        {
-            if (width <= 0 || height <= 0) return;
-
-            var rect = new OcvRect(
-                Math.Clamp(x, 0, Math.Max(0, Width - 1)),
-                Math.Clamp(y, 0, Math.Max(0, Height - 1)),
-                Math.Clamp(width, 1, Width - Math.Clamp(x, 0, Width - 1)),
-                Math.Clamp(height, 1, Height - Math.Clamp(y, 0, Height - 1))
-            );
-            if (rect.Width <= 0 || rect.Height <= 0) return;
-
-            using var roi = new Mat(Image, rect);
-            var copy = roi.Clone();
-            ReplaceWith(copy);
-        }
     }
 
-    /// <summary>
-    /// Handles selection tools + applies image ops to the document and InkCanvas strokes.
-    /// Adds interactive crop overlay. Also bakes strokes before any mutating op.
-    /// </summary>
     public sealed class ImageController
     {
         private readonly System.Windows.Controls.Image _imageView;
         private readonly Canvas _artboard;
         private readonly ContentControl _status;
-        private readonly InkCanvas _paint; // baked into Image on ops
+        private readonly InkCanvas _paint;
         private Ellipse? _polyStartMarker;
 
         public ImageDoc Doc { get; } = new ImageDoc();
 
-        // --- LAYERS integration ---
         private readonly LayerStack _layers = new LayerStack();
 
         public event Action? SelectionCreated;
         public int Layers_GetActiveIndex() => _layers.ActiveIndex;
 
-        // Active bitmap target for all pixel-writing tools (Brush/Shapes/Text/Paste)
         public OpenCvSharp.Mat Mat => _layers.ActiveMat;
 
-        // Callback for saving undo state (set by MainWindow)
         public Action<string>? SaveUndoStateCallback { get; set; }
 
-        // Lightweight layer API for MainWindow menu
         public System.Collections.Generic.List<string> Layers_AllNames => _layers.Layers.ConvertAll(l => l.Name);
         public string Layers_ActiveName => _layers.Active.Name;
-
 
         public void Layers_AddBlank()
         {
@@ -337,10 +234,8 @@ namespace PhotoMax
                 _layers.SetSingleFromMat(Doc.Image.Clone(), "Background");
         }
 
-        // Notify host (MainWindow) when the underlying bitmap changed (so it can update brush policy).
         public event Action? ImageChanged;
 
-        // --- selection mode (temporary while creating) ---
         private enum SelMode
         {
             None,
@@ -352,26 +247,19 @@ namespace PhotoMax
 
         private SelMode _mode = SelMode.None;
 
-        // --- active selection (persistent while painting) ---
-        private Geometry? _selectionClip; // paints are clipped to this when not null
-        private Geometry? _selectionEdge; // 1px widened ring of selection for edge painting
-        private bool _autoDeselectOnClickOutside = false; // sticky selection behavior
+        private Geometry? _selectionClip;
+        private Geometry? _selectionEdge;
+        private bool _autoDeselectOnClickOutside = false;
 
-        // Public exposure of selection state for Tools.cs
         public Geometry? SelectionFill => _selectionClip;
 
-        public Geometry? SelectionEdge => _selectionEdge;
-
-        // In ImageController class, update the property:
         public bool HasActiveSelection => _selectionClip != null || _lassoPts.Count > 0 || _polyPts.Count > 0 ||
                                           _mode != SelMode.None;
 
-        // ===== FAST SELECTION MASK (for lag-free painting) =====
-        private byte[]? _selMask; // 1 byte per pixel: 255 = inside, 0 = outside
+        private byte[]? _selMask;
         private int _selMaskW, _selMaskH;
         private bool _selMaskDirty = true;
 
-        /// <summary>Call once per stroke (or whenever selection changed) to (re)build the mask.</summary>
         public void RebuildSelectionMaskIfDirty()
         {
             if (!_selMaskDirty) return;
@@ -397,7 +285,6 @@ namespace PhotoMax
             var dv = new DrawingVisual();
             using (var dc = dv.RenderOpen())
             {
-                // Draw selection filled white; antialias will produce gray alpha we will threshold.
                 dc.DrawGeometry(Brushes.White, null, _selectionClip);
             }
 
@@ -424,7 +311,6 @@ namespace PhotoMax
             _selMaskDirty = false;
         }
 
-        /// <summary>Ultra-fast test: true if pixel is allowed for painting (or no selection at all).</summary>
         public bool FastMaskInside(int x, int y)
         {
             if (_selMask == null) return true;
@@ -434,28 +320,23 @@ namespace PhotoMax
 
         private void MarkSelectionDirty() => _selMaskDirty = true;
 
-        // rectangle
         private Rectangle? _rectBox;
         private bool _isDragging;
         private WPoint _dragStart;
 
-        // lasso (freehand)
         private Polyline? _lassoLine;
         private readonly List<WPoint> _lassoPts = new();
 
-        // polygon (click-to-add)
         private Polyline? _polyLine;
         private readonly List<WPoint> _polyPts = new();
         private bool _polyActive;
 
-        // active area (bounding box)
         private WRect? _activeSelectionRect;
 
-        // ---- interactive crop overlay
         private Path? _cropMaskPath;
         private Rectangle? _cropRectVis;
         private readonly List<Rectangle> _cropHandles = new();
-        private WRect _cropRect; // working rect
+        private WRect _cropRect;
         private CropHit _cropHit = CropHit.None;
         private WPoint _cropDragStart;
         private const double HandleSize = 8;
@@ -475,37 +356,22 @@ namespace PhotoMax
             SW
         }
 
-        // ---- floating paste (drag after paste, click elsewhere to place) ----
-        private Mat? _floatingMat; // BGRA content being moved
-        private System.Windows.Controls.Image? _floatingView; // visual for the floating content
-        private Rectangle? _floatingOutline; // subtle outline while hover/drag
-        private WPoint _floatPos; // top-left of floating content
-        private WPoint _floatStart; // sticky: remember origin of floating
+        private Mat? _floatingMat;
+        private System.Windows.Controls.Image? _floatingView;
+        private Rectangle? _floatingOutline;
+        private WPoint _floatPos;
+        private WPoint _floatStart;
         private bool _floatDragging;
         private bool _floatHovering;
-        private Vector _floatGrabDelta; // mouse offset at drag start
+        private Vector _floatGrabDelta;
         private bool _floatingActive;
-        private bool _floatingFromMove; // true if created via MoveSelection
+        private bool _floatingFromMove;
 
         public bool IsFloatingActive => _floatingActive;
 
-        public bool PixelFullyInsideSelection(int x, int y)
-        {
-            if (_selectionClip == null) return true;
-
-            // Require the entire 1×1 pixel box (shrunk slightly) to be *fully* inside the selection.
-            // This prevents painting on the dashed outline (edge anti-alias).
-            var rect = new WRect(x + 0.05, y + 0.05, 0.90, 0.90);
-            var detail = _selectionClip.FillContainsWithDetail(new RectangleGeometry(rect));
-            return detail == IntersectionDetail.FullyContains || detail == IntersectionDetail.FullyInside;
-        }
-
-        // ForceRefreshView is used by Tools.cs on tool switches.
-        // Implement it so that if a floating paste exists, we COMMIT it,
-        // but KEEP the selection (sticky-until-Enter behavior).
         public void ForceRefreshView()
         {
-            if (_floatingActive) CommitFloatingPaste(); // place but do NOT clear selection
+            if (_floatingActive) CommitFloatingPaste();
             RefreshView();
         }
 
@@ -535,18 +401,16 @@ namespace PhotoMax
             _paint = paintCanvas;
 
             HookSelectionEvents();
-            HookSelectionKeys(); // Ctrl+D and sticky Enter finalize; click-outside disabled for sticky
+            HookSelectionKeys();
             HookCropKeys();
             HookFloatingPasteEvents();
             HookFloatingKeys();
-            HookClipboardKeys(); // Ctrl+C / X / V
+            HookClipboardKeys();
             EnsureLayers();
-            HookFloatingKeys(); // Enter = place & clear; Esc = cancel; Arrows = nudge
-            HookClipboardKeys(); // Ctrl+C / X / V
+            HookFloatingKeys();
+            HookClipboardKeys();
             RefreshView();
         }
-
-        /* ---------------- API called from MainWindow / Tools.cs ---------------- */
 
         public void StartRectSelection()
         {
@@ -571,15 +435,12 @@ namespace PhotoMax
                 "Polygon: click to add points, click near start to close, Enter/Right-click/Double-click to finish, Esc to cancel.";
         }
 
-        /// <summary>
-        /// Crop menu: if Rect selection exists -> crop immediately, else open interactive crop overlay.
-        /// </summary>
         public void CropCommand()
         {
             if (_mode == SelMode.Rect && _activeSelectionRect is not null)
             {
                 BakeStrokesToImage();
-                // SaveUndoState should be called from MainWindow before this method
+
                 ApplyCropFromRect(_activeSelectionRect.Value);
                 return;
             }
@@ -619,21 +480,17 @@ namespace PhotoMax
             RefreshView();
         }
 
-        /// <summary>
-        /// Restores the active layer's Mat from a snapshot (used for undo/redo).
-        /// </summary>
         public void RestoreImageState(Mat snapshot)
         {
             if (snapshot == null || snapshot.Empty()) return;
 
-            BakeStrokesToImage(); // Bake any pending strokes first
+            BakeStrokesToImage();
 
-            // Replace the active layer's Mat with the snapshot
             var activeLayer = _layers.Active;
             if (activeLayer != null)
             {
                 var oldMat = activeLayer.Mat;
-                activeLayer.Mat = snapshot.Clone(); // Clone to avoid disposing the snapshot
+                activeLayer.Mat = snapshot.Clone();
                 oldMat?.Dispose();
 
                 RefreshView();
@@ -647,16 +504,11 @@ namespace PhotoMax
             {
                 BakeStrokesToImage();
 
-                // Save undo state before resizing
                 SaveUndoStateCallback?.Invoke($"Resize to {dlg.ResultWidth}×{dlg.ResultHeight}");
 
                 int oldW = Doc.Width, oldH = Doc.Height;
                 int newW = dlg.ResultWidth, newH = dlg.ResultHeight;
 
-                // Pixel-art friendly policy:
-                //  - Downscale: AREA (box filter)
-                //  - Upscale:   NEAREST (preserve blockiness, no fake detail)
-                //  - Same size: LINEAR (no-op visually)
                 InterpolationFlags mode;
                 if (newW < oldW || newH < oldH)
                     mode = InterpolationFlags.Area;
@@ -673,24 +525,6 @@ namespace PhotoMax
             }
         }
 
-        /* -------- Selection paint mode / Move selection / Copy -------- */
-
-        public void EnableSelectionPaintMode()
-        {
-            if (_selectionClip != null)
-            {
-                _paint.Clip = _selectionClip;
-                _status.Content = "Selection paint mode: brush is clipped to selection (Enter to finalize).";
-            }
-            else
-            {
-                _status.Content = "No active selection.";
-            }
-        }
-
-        // Image.cs (inside ImageController)
-        // Replace the BeginMoveSelectedArea method with this fixed version:
-
         public void BeginMoveSelectedArea()
         {
             if (_selectionClip == null)
@@ -699,10 +533,8 @@ namespace PhotoMax
                 return;
             }
 
-            // Keep selection active; we just move its contents.
             BakeStrokesToImage();
 
-            // **FIX: Use exact geometry bounds with proper rounding**
             var b = _selectionClip.Bounds;
             int left = (int)Math.Floor(b.X);
             int top = (int)Math.Floor(b.Y);
@@ -717,7 +549,6 @@ namespace PhotoMax
             int w = Math.Max(1, right - left);
             int h = Math.Max(1, bottom - top);
 
-            // **FIX: Build mask for EXACT selection (not rectangular)**
             var mask = BuildSelectionMaskBytes_Binary(left, top, w, h, 128);
 
             var clone = new Mat(h, w, MatType.CV_8UC4);
@@ -730,7 +561,6 @@ namespace PhotoMax
 
             var dstData = new byte[dstStep * h];
 
-            // Copy pixels and apply mask in one pass
             for (int y = 0; y < h; y++)
             {
                 int srcY = top + y;
@@ -749,55 +579,42 @@ namespace PhotoMax
                     int di = dstRow + x * 4;
                     int mi = maskRow + x * 4;
 
-                    byte maskAlpha = mask[mi + 3]; // 0 or 255
+                    byte maskAlpha = mask[mi + 3];
 
                     if (maskAlpha == 255)
                     {
-                        // Inside selection - copy pixel as-is
-                        dstData[di + 0] = srcData[si + 0]; // B
-                        dstData[di + 1] = srcData[si + 1]; // G
-                        dstData[di + 2] = srcData[si + 2]; // R
-                        dstData[di + 3] = srcData[si + 3]; // A
+                        dstData[di + 0] = srcData[si + 0];
+                        dstData[di + 1] = srcData[si + 1];
+                        dstData[di + 2] = srcData[si + 2];
+                        dstData[di + 3] = srcData[si + 3];
                     }
                     else
                     {
-                        // **CRITICAL FIX: Outside selection - transparent WHITE (not black)**
-                        dstData[di + 0] = 255; // B
-                        dstData[di + 1] = 255; // G
-                        dstData[di + 2] = 255; // R
-                        dstData[di + 3] = 0; // A = 0 (transparent)
+                        dstData[di + 0] = 255;
+                        dstData[di + 1] = 255;
+                        dstData[di + 2] = 255;
+                        dstData[di + 3] = 0;
                     }
                 }
             }
 
             Marshal.Copy(dstData, 0, clone.Data, dstData.Length);
 
-            // Clear ONLY selected pixels in the ACTIVE LAYER (Mat) to TRANSPARENT
             ClearMatRegionWithMaskToTransparent_Binary(Mat, left, top, w, h, mask);
 
             _floatingFromMove = true;
 
-            // Start floating paste with masked sprite
             BeginFloatingPaste(clone, left, top);
 
-            clone.Dispose(); // BeginFloatingPaste makes its own copy
+            clone.Dispose();
 
-            // Refresh immediately so the cleared area shows
             RefreshView();
 
-            // Set cursor to move cursor
             _paint.Cursor = Cursors.SizeAll;
             _paint.EditingMode = InkCanvasEditingMode.None;
             _paint.IsHitTestVisible = false;
 
             _status.Content = "Move: drag to reposition, Enter to place (selection stays), Esc to cancel.";
-        }
-
-        private void HideSelectionVisuals()
-        {
-            if (_rectBox != null) _rectBox.Visibility = Visibility.Collapsed;
-            if (_lassoLine != null) _lassoLine.Visibility = Visibility.Collapsed;
-            if (_polyLine != null) _polyLine.Visibility = Visibility.Collapsed;
         }
 
         private void ClearMatRegionWithMaskToTransparent_Binary(Mat targetMat, int x, int y, int w, int h, byte[] mask)
@@ -810,7 +627,6 @@ namespace PhotoMax
 
             int mStride = w * 4;
 
-            // **FIX: Check if target is the background layer (first layer with index 0)**
             bool isBackgroundLayer = false;
             if (_layers?.Layers.Count > 0)
             {
@@ -832,26 +648,23 @@ namespace PhotoMax
 
                     int di = rowD + ix * 4;
                     int mi = rowM + xx * 4;
-                    byte a = mask[mi + 3]; // 0 or 255
+                    byte a = mask[mi + 3];
 
-                    if (a == 0) continue; // do not clear outside selection
+                    if (a == 0) continue;
 
-                    // **FIX: Background layer clears to WHITE, other layers to TRANSPARENT**
                     if (isBackgroundLayer)
                     {
-                        // Background layer: opaque white (like Photoshop/GIMP)
-                        dst[di + 0] = 255; // B
-                        dst[di + 1] = 255; // G
-                        dst[di + 2] = 255; // R
-                        dst[di + 3] = 255; // A = 255 (opaque)
+                        dst[di + 0] = 255;
+                        dst[di + 1] = 255;
+                        dst[di + 2] = 255;
+                        dst[di + 3] = 255;
                     }
                     else
                     {
-                        // Other layers: fully transparent
-                        dst[di + 0] = 0; // B
-                        dst[di + 1] = 0; // G
-                        dst[di + 2] = 0; // R
-                        dst[di + 3] = 0; // A = 0 (transparent)
+                        dst[di + 0] = 0;
+                        dst[di + 1] = 0;
+                        dst[di + 2] = 0;
+                        dst[di + 3] = 0;
                     }
                 }
             }
@@ -859,25 +672,20 @@ namespace PhotoMax
             Marshal.Copy(dst, 0, targetMat.Data, dst.Length);
         }
 
-        /// <summary>Finalize (place floating if any) and clear the selection — bound to Enter.</summary>
-        /// <summary>Finalize (place floating if any) and clear the selection — bound to Enter.</summary>
         private void FinalizeSelection()
         {
-            if (_floatingActive) CommitFloatingPaste(); // now keeps the selection; we'll clear next
+            if (_floatingActive) CommitFloatingPaste();
 
-            // **FIX: Properly clear ALL selection state**
             _selectionClip = null;
             _selectionEdge = null;
             _paint.Clip = null;
             MarkSelectionDirty();
 
-            // Clear visual elements
             if (_rectBox != null) _rectBox.Visibility = Visibility.Collapsed;
             if (_lassoLine != null) _lassoLine.Visibility = Visibility.Collapsed;
             if (_polyLine != null) _polyLine.Visibility = Visibility.Collapsed;
             if (_polyStartMarker != null) _polyStartMarker.Visibility = Visibility.Collapsed;
 
-            // Clear point lists
             _lassoPts.Clear();
             _polyPts.Clear();
             _activeSelectionRect = null;
@@ -885,15 +693,12 @@ namespace PhotoMax
             _status.Content = "Selection finalized and cleared.";
         }
 
-        /* ---------------- view plumbing ---------------- */
-
         private void RefreshView()
         {
             EnsureLayers();
             Doc.ReplaceWith(_layers.Composite());
             _imageView.Source = Doc.ToBitmapSource();
 
-            // Make both bitmap and vector overlay honor pixel boundaries.
             RenderOptions.SetBitmapScalingMode(_imageView, BitmapScalingMode.NearestNeighbor);
             RenderOptions.SetBitmapScalingMode(_paint, BitmapScalingMode.NearestNeighbor);
             RenderOptions.SetEdgeMode(_paint, EdgeMode.Aliased);
@@ -905,10 +710,8 @@ namespace PhotoMax
             _imageView.Width = Doc.Width;
             _imageView.Height = Doc.Height;
 
-            ImageChanged?.Invoke(); // let MainWindow recompute brush size vs image resolution
+            ImageChanged?.Invoke();
         }
-
-        /* ---------------- selection visuals ---------------- */
 
         private void EnsureRectBox()
         {
@@ -931,7 +734,7 @@ namespace PhotoMax
             _lassoLine = new Polyline
             {
                 Stroke = Brushes.Orange,
-                StrokeThickness = 2.5, // **FIX: Thicker border (was 1.5)**
+                StrokeThickness = 2.5,
                 StrokeDashArray = new DoubleCollection { 2, 2 },
                 Fill = new SolidColorBrush(Color.FromArgb(20, 255, 165, 0)),
                 IsHitTestVisible = false,
@@ -952,7 +755,7 @@ namespace PhotoMax
             _polyLine = new Polyline
             {
                 Stroke = Brushes.MediumVioletRed,
-                StrokeThickness = 2.5, // **FIX: Thicker border (was 1.5)**
+                StrokeThickness = 2.5,
                 StrokeDashArray = new DoubleCollection { 4, 2 },
                 Fill = new SolidColorBrush(Color.FromArgb(20, 199, 21, 133)),
                 IsHitTestVisible = false,
@@ -1011,23 +814,20 @@ namespace PhotoMax
             _status.Content = $"Selection: {r.X:0},{r.Y:0}  {r.Width:0}×{r.Height:0}";
         }
 
-
         private void ShowSelectionVisuals()
         {
             if (_selectionClip == null) return;
 
-            // Prefer original shape visuals if available
             if (_lassoPts.Count > 0 && _lassoLine != null)
             {
-                ShowLasso(); // This will hide the rect box
+                ShowLasso();
             }
             else if (_polyPts.Count > 0 && _polyLine != null)
             {
-                ShowPolygon(); // This will hide the rect box
+                ShowPolygon();
             }
             else if (_activeSelectionRect is WRect rr && rr.Width >= 1 && rr.Height >= 1)
             {
-                // Only show rect box if it's actually a rectangle selection
                 if (_mode == SelMode.Rect || (_lassoPts.Count == 0 && _polyPts.Count == 0))
                 {
                     ShowRect(rr);
@@ -1048,10 +848,8 @@ namespace PhotoMax
             _lassoLine.Points = new PointCollection(_lassoPts);
             _lassoLine.Visibility = Visibility.Visible;
 
-            // **FIX: Thicker border (was 2.5)**
             _lassoLine.StrokeThickness = 3.0;
 
-            // **FIX: Hide the rectangle box for lasso selections**
             HideRectBox();
 
             var r = BoundsOf(_lassoPts);
@@ -1073,10 +871,8 @@ namespace PhotoMax
             _polyLine.Points = new PointCollection(_polyPts);
             _polyLine.Visibility = Visibility.Visible;
 
-            // **FIX: Thicker border (was 2.5)**
             _polyLine.StrokeThickness = 3.0;
 
-            // **FIX: Show green circle at start point when you have 3+ points**
             if (_polyPts.Count >= 3 && _polyActive)
             {
                 EnsurePolyStartMarker();
@@ -1090,7 +886,6 @@ namespace PhotoMax
                 _polyStartMarker.Visibility = Visibility.Collapsed;
             }
 
-            // **FIX: Hide the rectangle box for polygon selections**
             HideRectBox();
 
             var r = BoundsOf(_polyPts);
@@ -1098,14 +893,11 @@ namespace PhotoMax
             _status.Content = $"Polygon: {r.X:0},{r.Y:0}  {r.Width:0}×{r.Height:0} ({_polyPts.Count} points)";
         }
 
-        /* ---------------- selection lifecycle ---------------- */
-
         private void BeginSelectionMode(SelMode mode)
         {
-            EndSelectionMode(); // clear any prior selection + clip
+            EndSelectionMode();
             _mode = mode;
 
-            // **FIX: Disable painting AND shapes tool**
             _paint.EditingMode = InkCanvasEditingMode.None;
             _paint.IsHitTestVisible = false;
             _paint.Cursor = Cursors.Arrow;
@@ -1116,7 +908,6 @@ namespace PhotoMax
 
         private void EndSelectionMode()
         {
-            // clear selection visuals from *temporary* modes
             if (_mode == SelMode.Rect || _mode == SelMode.Lasso || _mode == SelMode.Polygon)
             {
                 _isDragging = false;
@@ -1133,52 +924,41 @@ namespace PhotoMax
                 if (_polyLine != null) _polyLine.Visibility = Visibility.Collapsed;
             }
 
-            // clear interactive crop UI if any
             if (_mode == SelMode.CropInteractive)
             {
                 RemoveCropOverlay();
             }
 
-            // always clear persistent selection/clip on EndSelectionMode
             DeselectSelection();
 
             _mode = SelMode.None;
             _status.Content = "Ready";
 
-            // Re-enable painting
             _paint.IsHitTestVisible = true;
             _paint.EditingMode = InkCanvasEditingMode.Ink;
             _paint.Cursor = Cursors.Pen;
         }
 
-        // Finalize a created selection and immediately return to painting, clipped to the selection.
-        // Finalize a created selection and immediately return to painting, clipped to the selection.
-        // Finalize a created selection and immediately return to painting, clipped to the selection.
         private void ActivateSelectionPainting(Geometry clipGeom)
         {
             _selectionClip = clipGeom;
             _selectionClip.Freeze();
 
-            // Precompute a crisp 1px ring for "edge paint when outside"
             var pen = new Pen(Brushes.Black, 1.0);
             _selectionEdge = _selectionClip.GetWidenedPathGeometry(pen);
             _selectionEdge.Freeze();
 
             _paint.Clip = _selectionClip;
 
-            // selection mask will need rebuilding
             MarkSelectionDirty();
 
-            // show visuals but exit selection mode -> back to painting
             _mode = SelMode.None;
             _paint.IsHitTestVisible = true;
             _paint.EditingMode = InkCanvasEditingMode.Ink;
             _paint.Cursor = Cursors.Pen;
 
-            // sticky: do NOT auto-deselect on click-outside
             _autoDeselectOnClickOutside = false;
 
-            // **NEW: Notify that selection was created**
             SelectionCreated?.Invoke();
 
             _status.Content = "Selection created — use Move tool to reposition, or paint inside (Enter to finalize).";
@@ -1190,27 +970,18 @@ namespace PhotoMax
             _selectionEdge = null;
             _paint.Clip = null;
 
-            // selection mask invalidated
             MarkSelectionDirty();
 
-            // **FIX: Clear ALL visual elements**
             if (_rectBox != null) _rectBox.Visibility = Visibility.Collapsed;
             if (_lassoLine != null) _lassoLine.Visibility = Visibility.Collapsed;
             if (_polyLine != null) _polyLine.Visibility = Visibility.Collapsed;
             if (_polyStartMarker != null) _polyStartMarker.Visibility = Visibility.Collapsed;
 
-            // **FIX: Clear point lists**
             _lassoPts.Clear();
             _polyPts.Clear();
             _activeSelectionRect = null;
         }
 
-        /* ---------------- stroke baking (safe managed blend) ---------------- */
-
-        /// <summary>
-        /// Renders InkCanvas strokes into a bitmap and alpha-composites onto Doc.Image (non-premultiplied BGRA),
-        /// then clears strokes. Pure managed code, no unsafe.
-        /// </summary>
         private void BakeStrokesToImage()
         {
             if (_paint.Strokes == null || _paint.Strokes.Count == 0) return;
@@ -1222,7 +993,6 @@ namespace PhotoMax
                 return;
             }
 
-            // 1) Render strokes to a Pbgra32 RenderTargetBitmap
             var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
             var dv = new DrawingVisual();
             using (var dc = dv.RenderOpen())
@@ -1235,14 +1005,12 @@ namespace PhotoMax
 
             int srcStride = w * 4;
             var src = new byte[srcStride * h];
-            rtb.CopyPixels(src, srcStride, 0); // Pbgra32 (premultiplied)
+            rtb.CopyPixels(src, srcStride, 0);
 
-            // 2) Copy Doc.Image bytes to managed buffer (may have padding via Step)
             int dstStep = (int)Mat.Step();
             var dst = new byte[dstStep * h];
-            Marshal.Copy(Doc.Image.Data, dst, 0, dst.Length); // BGRA non-premultiplied
+            Marshal.Copy(Doc.Image.Data, dst, 0, dst.Length);
 
-            // 3) Blend row-by-row (respecting dstStep vs srcStride)
             for (int y = 0; y < h; y++)
             {
                 int srcRow = y * srcStride;
@@ -1260,23 +1028,18 @@ namespace PhotoMax
                     if (sa == 0)
                         continue;
 
-                    // src is premultiplied: channels already * a
                     double a = sa / 255.0;
-                    dst[di + 0] = (byte)Math.Clamp(sb + (1.0 - a) * dst[di + 0], 0, 255); // B
-                    dst[di + 1] = (byte)Math.Clamp(sg + (1.0 - a) * dst[di + 1], 0, 255); // G
-                    dst[di + 2] = (byte)Math.Clamp(sr + (1.0 - a) * dst[di + 2], 0, 255); // R
-                    dst[di + 3] = 255; // keep opaque
+                    dst[di + 0] = (byte)Math.Clamp(sb + (1.0 - a) * dst[di + 0], 0, 255);
+                    dst[di + 1] = (byte)Math.Clamp(sg + (1.0 - a) * dst[di + 1], 0, 255);
+                    dst[di + 2] = (byte)Math.Clamp(sr + (1.0 - a) * dst[di + 2], 0, 255);
+                    dst[di + 3] = 255;
                 }
             }
 
-            // 4) Copy blended bytes back into Mat
             Marshal.Copy(dst, 0, Doc.Image.Data, dst.Length);
 
-            // 5) Clear vector strokes after baking
             _paint.Strokes.Clear();
         }
-
-        /* ---------------- clipboard (copy / cut / paste) ---------------- */
 
         public void CopySelectionToClipboard()
         {
@@ -1291,7 +1054,6 @@ namespace PhotoMax
                 return;
             }
 
-            // Extract with mask (same as before)
             var b = _selectionClip.Bounds;
             int left = (int)Math.Floor(b.X);
             int top = (int)Math.Floor(b.Y);
@@ -1340,15 +1102,13 @@ namespace PhotoMax
 
                     if (maskAlpha == 255)
                     {
-                        // **FIX: PRESERVE original alpha!**
-                        dstData[di + 0] = srcData[si + 0]; // B
-                        dstData[di + 1] = srcData[si + 1]; // G
-                        dstData[di + 2] = srcData[si + 2]; // R
-                        dstData[di + 3] = srcData[si + 3]; // A - KEEP ORIGINAL!
+                        dstData[di + 0] = srcData[si + 0];
+                        dstData[di + 1] = srcData[si + 1];
+                        dstData[di + 2] = srcData[si + 2];
+                        dstData[di + 3] = srcData[si + 3];
                     }
                     else
                     {
-                        // Outside selection - transparent white
                         dstData[di + 0] = 255;
                         dstData[di + 1] = 255;
                         dstData[di + 2] = 255;
@@ -1360,45 +1120,10 @@ namespace PhotoMax
             Marshal.Copy(dstData, 0, extractedMat.Data, dstData.Length);
             ConvertTransparentBlackToWhite(extractedMat);
 
-            // **FIX: Copy as PNG to preserve transparency**
             CopyMatToClipboardAsPNG(extractedMat);
             extractedMat.Dispose();
 
             _status.Content = $"Copied {w}×{h}";
-        }
-
-        private void CopyRectRegionToClipboard(WRect r, bool applyMask, byte[]? mask)
-        {
-            int x = (int)Math.Floor(r.X);
-            int y = (int)Math.Floor(r.Y);
-            int w = (int)Math.Ceiling(r.Width);
-            int h = (int)Math.Ceiling(r.Height);
-
-            // Clamp to image bounds
-            x = Math.Clamp(x, 0, Math.Max(0, Doc.Image.Width - 1));
-            y = Math.Clamp(y, 0, Math.Max(0, Doc.Image.Height - 1));
-            w = Math.Clamp(w, 1, Doc.Image.Width - x);
-            h = Math.Clamp(h, 1, Doc.Image.Height - y);
-
-            if (w <= 0 || h <= 0)
-            {
-                MessageBox.Show("Nothing to copy.");
-                return;
-            }
-
-            using var roi = new Mat(Doc.Image, new OcvRect(x, y, w, h));
-            using var clone = roi.Clone();
-
-            // **FIX: Apply mask if needed (for lasso/polygon selections)**
-            if (applyMask && mask != null)
-            {
-                ApplyAlphaMaskToMat_Binary(clone, mask, w, h);
-            }
-
-            var bmp = MatToBitmapSourceBGRA(clone);
-            var pbgra = new FormatConvertedBitmap(bmp, PixelFormats.Pbgra32, null, 0);
-            pbgra.Freeze();
-            Clipboard.SetImage(pbgra);
         }
 
         public void CutSelectionToClipboard()
@@ -1416,7 +1141,6 @@ namespace PhotoMax
                 return;
             }
 
-            // Same extraction logic as Copy
             var b = _selectionClip.Bounds;
             int left = (int)Math.Floor(b.X);
             int top = (int)Math.Floor(b.Y);
@@ -1495,10 +1219,8 @@ namespace PhotoMax
         {
             var bmp = MatToBitmapSourceBGRA(bgra);
 
-            // **FIX: Create PNG with explicit linear color profile to prevent gamma shift**
             var encoder = new PngBitmapEncoder();
 
-            // Create a new bitmap with NO color profile (raw pixel values)
             var pixels = new byte[bmp.PixelWidth * bmp.PixelHeight * 4];
             bmp.CopyPixels(pixels, bmp.PixelWidth * 4, 0);
 
@@ -1507,7 +1229,7 @@ namespace PhotoMax
                 bmp.PixelHeight,
                 96, 96,
                 PixelFormats.Bgra32,
-                null, // NO color palette - this is critical
+                null,
                 pixels,
                 bmp.PixelWidth * 4);
             rawBitmap.Freeze();
@@ -1521,11 +1243,9 @@ namespace PhotoMax
 
                 var dataObject = new DataObject();
 
-                // Copy the stream bytes to prevent disposal issues
                 var pngBytes = ms.ToArray();
                 dataObject.SetData("PNG", new System.IO.MemoryStream(pngBytes), false);
 
-                // Also set as regular bitmap
                 dataObject.SetImage(rawBitmap);
 
                 Clipboard.SetDataObject(dataObject, true);
@@ -1546,7 +1266,6 @@ namespace PhotoMax
 
             Mat? src = null;
 
-            // Try PNG first
             if (Clipboard.ContainsData("PNG"))
             {
                 try
@@ -1584,7 +1303,6 @@ namespace PhotoMax
                                 src = bgra;
                             }
 
-                            // **FIX: Convert transparent black to transparent white IMMEDIATELY**
                             ConvertTransparentBlackToWhite(src);
 
                             _status.Content = "Pasted from PNG (colors preserved)";
@@ -1598,7 +1316,6 @@ namespace PhotoMax
                 }
             }
 
-            // Fallback
             if (src == null)
             {
                 if (!Clipboard.ContainsImage())
@@ -1616,7 +1333,6 @@ namespace PhotoMax
 
                 src = BitmapSourceToMatBGRA(cb);
 
-                // **FIX: Convert transparent black to transparent white here too**
                 ConvertTransparentBlackToWhite(src);
 
                 _status.Content = "Pasted from clipboard";
@@ -1640,23 +1356,18 @@ namespace PhotoMax
             }
         }
 
-        /* ---------------- floating paste implementation ---------------- */
-
         private void BeginFloatingPaste(Mat sourceBGRA, int x, int y)
         {
-            // If a previous floating paste exists, place it first for predictability
             if (_floatingActive) CommitFloatingPaste();
 
-            _floatingMat = sourceBGRA.Clone(); // keep our own copy
+            _floatingMat = sourceBGRA.Clone();
 
-            // **FIX: Convert transparent black to transparent white to avoid black background**
             ConvertTransparentBlackToWhite(_floatingMat);
 
             _floatPos = new WpfPoint(x, y);
-            _floatStart = _floatPos; // remember origin for sticky translate
+            _floatStart = _floatPos;
             ClampFloatingToBounds();
 
-            // Make a WPF Image that shows the floating content on top
             var bmp = MatToBitmapSourceBGRA(_floatingMat);
             _floatingView = new System.Windows.Controls.Image
             {
@@ -1669,7 +1380,6 @@ namespace PhotoMax
             Panel.SetZIndex(_floatingView, 2000);
             _artboard.Children.Add(_floatingView);
 
-            // **FIX: ALWAYS create outline, even for move operations!**
             _floatingOutline = new Rectangle
             {
                 Width = _floatingMat.Width,
@@ -1688,7 +1398,6 @@ namespace PhotoMax
             UpdateFloatingView();
             UpdateFloatingOutlineVisibility(forceVisible: true);
 
-            // Disable painting so dragging is smooth and Artboard gets the mouse
             _paint.EditingMode = InkCanvasEditingMode.None;
             _paint.IsHitTestVisible = false;
             _paint.Cursor = Cursors.Arrow;
@@ -1702,20 +1411,16 @@ namespace PhotoMax
         {
             if (!_floatingActive || _floatingMat is null) return;
 
-            // Blend to the ACTIVE LAYER (Mat), not Doc.Image
             AlphaBlendOverToMat(Mat, _floatingMat, (int)Math.Round(_floatPos.X), (int)Math.Round(_floatPos.Y));
 
-            // If this floating came from MoveSelection, translate selection geometry & visuals
             if (_floatingFromMove && _selectionClip != null)
             {
                 var dx = _floatPos.X - _floatStart.X;
                 var dy = _floatPos.Y - _floatStart.Y;
                 TranslateSelectionGeometry(dx, dy);
 
-                // **FIX: Show the correct selection visuals (lasso, not rect)**
                 ShowSelectionVisuals();
 
-                // **RE-ENABLE PAINTING CLIPPED TO SELECTION**
                 _paint.Clip = _selectionClip;
                 _paint.IsHitTestVisible = true;
                 _paint.EditingMode = InkCanvasEditingMode.Ink;
@@ -1727,7 +1432,6 @@ namespace PhotoMax
             }
             else
             {
-                // **FIX: Regular paste doesn't create a selection - just place it**
                 _status.Content = "Pasted.";
             }
 
@@ -1739,13 +1443,10 @@ namespace PhotoMax
         {
             if (!_floatingActive) return;
 
-            // If this was a move operation, we need to restore the original pixels
             if (_floatingFromMove && _floatingMat != null)
             {
-                // Restore the pixels at the ORIGINAL location (before move started)
                 AlphaBlendOverToMat(Mat, _floatingMat, (int)Math.Round(_floatStart.X), (int)Math.Round(_floatStart.Y));
 
-                // Show the selection visuals back at original location
                 ShowSelectionVisuals();
 
                 _status.Content = "Move cancelled - selection restored.";
@@ -1773,7 +1474,6 @@ namespace PhotoMax
             _floatDragging = false;
             _floatHovering = false;
 
-            // Re-enable painting (respect clip if there was one)
             _paint.IsHitTestVisible = true;
             _paint.EditingMode = InkCanvasEditingMode.Ink;
             _paint.Cursor = Cursors.Pen;
@@ -1793,7 +1493,6 @@ namespace PhotoMax
                 Canvas.SetTop(_floatingOutline, _floatPos.Y);
             }
 
-            // **FIX: Update lasso/polygon visuals in real-time during move**
             if (_floatingFromMove && _selectionClip != null)
             {
                 var dx = _floatPos.X - _floatStart.X;
@@ -1804,7 +1503,6 @@ namespace PhotoMax
 
         private void UpdateSelectionVisualsForMove(double dx, double dy)
         {
-            // Update lasso visual
             if (_lassoPts.Count > 0 && _lassoLine != null)
             {
                 var movedPoints = new PointCollection();
@@ -1817,7 +1515,6 @@ namespace PhotoMax
                 _lassoLine.Visibility = Visibility.Visible;
             }
 
-            // Update polygon visual
             if (_polyPts.Count > 0 && _polyLine != null)
             {
                 var movedPoints = new PointCollection();
@@ -1830,7 +1527,6 @@ namespace PhotoMax
                 _polyLine.Visibility = Visibility.Visible;
             }
 
-            // Always hide the rectangle box during move
             HideRectBox();
         }
 
@@ -1855,7 +1551,6 @@ namespace PhotoMax
             _floatHovering = hit;
             _artboard.Cursor = hit ? Cursors.SizeAll : Cursors.Arrow;
 
-            // **FIX: Only update outline if it exists (won't exist for move operations)**
             if (_floatingOutline != null)
             {
                 UpdateFloatingOutlineVisibility(forceVisible: _floatDragging || _floatHovering);
@@ -1874,35 +1569,28 @@ namespace PhotoMax
 
             _floatingOutline.Visibility = Visibility.Visible;
 
-            // **NEW: Change appearance based on hover/drag state**
             if (_floatDragging)
             {
-                // Dragging: thick solid line (bright cyan)
                 _floatingOutline.StrokeThickness = 4.0;
-                _floatingOutline.StrokeDashArray = null; // Solid
+                _floatingOutline.StrokeDashArray = null;
                 _floatingOutline.Stroke = Brushes.Cyan;
             }
             else if (_floatHovering || forceVisible)
             {
-                // Hovering: thick dashed line (yellow)
                 _floatingOutline.StrokeThickness = 3.5;
                 _floatingOutline.StrokeDashArray = new DoubleCollection { 4, 2 };
                 _floatingOutline.Stroke = Brushes.Yellow;
             }
             else
             {
-                // Idle: medium dashed line (blue)
                 _floatingOutline.StrokeThickness = 2.5;
                 _floatingOutline.StrokeDashArray = new DoubleCollection { 6, 3 };
                 _floatingOutline.Stroke = Brushes.DodgerBlue;
             }
         }
 
-        /* ---------------- floating paste event hooks ---------------- */
-
         private void HookFloatingPasteEvents()
         {
-            // Use Preview* so we can swallow events while floating
             _artboard.PreviewMouseLeftButtonDown += (s, e) =>
             {
                 if (!_floatingActive) return;
@@ -1911,11 +1599,10 @@ namespace PhotoMax
                 if (HitTestFloating(pos))
                 {
                     _floatDragging = true;
-                    _floatHovering = true; // **ADD THIS**
+                    _floatHovering = true;
                     _floatGrabDelta = (Vector)(pos - _floatPos);
                     _artboard.CaptureMouse();
 
-                    // **FIX: Make border thicker when actively dragging**
                     if (_floatingFromMove)
                     {
                         SetSelectionVisualThickness(3.5);
@@ -1926,7 +1613,6 @@ namespace PhotoMax
                 }
                 else
                 {
-                    // Click outside: place it (selection stays)
                     CommitFloatingPaste();
                     e.Handled = true;
                 }
@@ -1947,11 +1633,9 @@ namespace PhotoMax
                 }
                 else
                 {
-                    // **FIX: Update hover state and cursor**
                     bool wasHovering = _floatHovering;
                     UpdateFloatingCursor(pos);
 
-                    // **Update outline when hover state changes**
                     if (_floatHovering != wasHovering)
                     {
                         UpdateFloatingOutlineVisibility(forceVisible: _floatHovering);
@@ -1967,13 +1651,11 @@ namespace PhotoMax
                     _floatDragging = false;
                     _artboard.ReleaseMouseCapture();
 
-                    // **FIX: Return to normal thickness when done dragging**
                     if (_floatingFromMove)
                     {
                         SetSelectionVisualThickness(2.5);
                     }
 
-                    // **FIX: Update outline based on current hover state**
                     UpdateFloatingOutlineVisibility(forceVisible: _floatHovering);
                     e.Handled = true;
                 }
@@ -1999,7 +1681,6 @@ namespace PhotoMax
                 {
                     if (e.Key == Key.Enter)
                     {
-                        // Place then clear selection (finalize)
                         CommitFloatingPaste();
                         DeselectSelection();
                         _status.Content = "Selection finalized.";
@@ -2014,7 +1695,6 @@ namespace PhotoMax
                     }
                     else if (e.Key == Key.Left || e.Key == Key.Right || e.Key == Key.Up || e.Key == Key.Down)
                     {
-                        // Arrow-key nudge for fine placement
                         int dx = (e.Key == Key.Left) ? -1 : (e.Key == Key.Right) ? 1 : 0;
                         int dy = (e.Key == Key.Up) ? -1 : (e.Key == Key.Down) ? 1 : 0;
                         _floatPos = new WPoint(_floatPos.X + dx, _floatPos.Y + dy);
@@ -2040,38 +1720,35 @@ namespace PhotoMax
                 switch (e.Key)
                 {
                     case Key.C:
-                        // Place floating first if present, then copy (CopySelectionToClipboard handles baking)
+
                         CopySelectionToClipboard();
                         e.Handled = true;
                         break;
 
                     case Key.X:
-                        // Place floating first if present, then cut
+
                         CutSelectionToClipboard();
                         e.Handled = true;
                         break;
 
                     case Key.V:
-                        if (_floatingActive) CommitFloatingPaste(); // predictable behavior
+                        if (_floatingActive) CommitFloatingPaste();
                         PasteFromClipboard();
                         e.Handled = true;
                         break;
                 }
             };
 
-            // Catch keys regardless of which control currently has focus
             _artboard.PreviewKeyDown += handler;
             _paint.PreviewKeyDown += handler;
             _imageView.PreviewKeyDown += handler;
 
-            // Belt & suspenders: listen on the window too (use alias to avoid OpenCvSharp.Window clash)
             if (Application.Current?.MainWindow is WWindow win)
                 win.PreviewKeyDown += handler;
         }
 
         private void HookSelectionKeys()
         {
-            // Ctrl+D -> Deselect (industry standard)
             KeyEventHandler handler = (s, e) =>
             {
                 if (e.Handled) return;
@@ -2085,10 +1762,8 @@ namespace PhotoMax
                     return;
                 }
 
-                // Enter finalizes selection (place floating if any, then clear)
                 if (e.Key == Key.Enter)
                 {
-                    // If actively drawing polygon, finish it
                     if (_mode == SelMode.Polygon && _polyActive && _polyPts.Count >= 3)
                     {
                         FinishPolygonSelection();
@@ -2096,7 +1771,6 @@ namespace PhotoMax
                         return;
                     }
 
-                    // If there's any selection (active or sticky), finalize and clear it
                     if (_selectionClip != null || _floatingActive)
                     {
                         FinalizeSelection();
@@ -2105,20 +1779,18 @@ namespace PhotoMax
                     }
                 }
 
-                // **FIX: Escape cancels polygon drawing**
                 if (e.Key == Key.Escape && _mode == SelMode.Polygon && _polyActive)
                 {
                     _polyActive = false;
                     _polyPts.Clear();
                     if (_polyLine != null) _polyLine.Visibility = Visibility.Collapsed;
-                    if (_polyStartMarker != null) _polyStartMarker.Visibility = Visibility.Collapsed; // **ADD THIS**
+                    if (_polyStartMarker != null) _polyStartMarker.Visibility = Visibility.Collapsed;
                     EndSelectionMode();
                     _status.Content = "Polygon cancelled.";
                     e.Handled = true;
                     return;
                 }
 
-                // Enter finalizes selection (place floating if any, then clear)
                 if (e.Key == Key.Enter && _selectionClip != null)
                 {
                     FinalizeSelection();
@@ -2133,24 +1805,18 @@ namespace PhotoMax
             if (Application.Current?.MainWindow is WWindow win)
                 win.PreviewKeyDown += handler;
 
-            // Sticky mode: disable click-outside auto-deselect (keeps selection until Enter)
             _artboard.PreviewMouseLeftButtonDown += (s, e) =>
             {
-                if (_floatingActive) return; // floating handler owns clicks
-                if (_mode != SelMode.None) return; // currently creating a selection
+                if (_floatingActive) return;
+                if (_mode != SelMode.None) return;
                 if (_selectionClip == null) return;
-
-                // do nothing on click-outside — sticky until Enter
             };
         }
-
-        /* ---------------- interactive crop ---------------- */
 
         public void StartInteractiveCrop()
         {
             BeginSelectionMode(SelMode.CropInteractive);
 
-            // Default crop rect: center ~70%
             double w = Doc.Width, h = Doc.Height;
             double cw = Math.Max(32, w * 0.7);
             double ch = Math.Max(32, h * 0.7);
@@ -2185,7 +1851,7 @@ namespace PhotoMax
             }
 
             BakeStrokesToImage();
-            // Save undo state before applying crop
+
             SaveUndoStateCallback?.Invoke("Crop");
             _layers.Crop(
                 (int)Math.Floor(r.X),
@@ -2264,12 +1930,10 @@ namespace PhotoMax
 
         private void UpdateCropOverlay()
         {
-            // Constrain rect to image bounds
             _cropRect = WRect.Intersect(_cropRect, new WRect(0, 0, Doc.Width, Doc.Height));
             if (_cropRect.IsEmpty)
                 _cropRect = new WRect(0, 0, Math.Min(64, Doc.Width), Math.Min(64, Doc.Height));
 
-            // Mask geometry: full image minus crop rect
             var outer = new RectangleGeometry(new WRect(0, 0, Doc.Width, Doc.Height));
             var inner = new RectangleGeometry(_cropRect);
             var cg = new GeometryGroup { FillRule = FillRule.EvenOdd };
@@ -2277,13 +1941,11 @@ namespace PhotoMax
             cg.Children.Add(inner);
             _cropMaskPath!.Data = cg;
 
-            // Crop rect visual
             Canvas.SetLeft(_cropRectVis!, _cropRect.X);
             Canvas.SetTop(_cropRectVis!, _cropRect.Y);
             _cropRectVis!.Width = _cropRect.Width;
             _cropRectVis!.Height = _cropRect.Height;
 
-            // Handles (N, S, E, W, NE, NW, SE, SW)
             var cx = _cropRect.X + _cropRect.Width / 2;
             var cy = _cropRect.Y + _cropRect.Height / 2;
             var left = _cropRect.X;
@@ -2312,8 +1974,6 @@ namespace PhotoMax
                 r.Cursor = cur;
             }
         }
-
-        /* ---------------- crop mouse/key handling ---------------- */
 
         private CropHit HitTestCrop(WPoint p)
         {
@@ -2463,13 +2123,11 @@ namespace PhotoMax
                             _polyActive = true;
                         }
 
-                        // **FIX: Auto-close if clicking near the start point**
                         if (_polyPts.Count >= 3)
                         {
                             var start = _polyPts[0];
                             var dist = Math.Sqrt(Math.Pow(pos.X - start.X, 2) + Math.Pow(pos.Y - start.Y, 2));
 
-                            // If within 10 pixels of start, close the polygon
                             if (dist < 10.0)
                             {
                                 FinishPolygonSelection();
@@ -2528,7 +2186,6 @@ namespace PhotoMax
                         _isDragging = false;
                         _artboard.ReleaseMouseCapture();
 
-                        // finalize: clip to rectangle & return to painting
                         if (_activeSelectionRect is WRect rr && rr.Width >= 1 && rr.Height >= 1)
                         {
                             var geom = new RectangleGeometry(rr);
@@ -2548,11 +2205,9 @@ namespace PhotoMax
 
                         if (_lassoPts.Count > 2)
                         {
-                            // close and show
                             if (_lassoPts[0] != _lassoPts[^1]) _lassoPts.Add(_lassoPts[0]);
                             ShowLasso();
 
-                            // build polygon geometry for clip
                             var sg = new StreamGeometry();
                             using (var ctx = sg.Open())
                             {
@@ -2598,7 +2253,6 @@ namespace PhotoMax
 
             _artboard.MouseDown += (s, e) =>
             {
-                // **FIX: Double-click to finish polygon**
                 if (_mode == SelMode.Polygon && e.ChangedButton == MouseButton.Left && e.ClickCount == 2)
                 {
                     if (_polyPts.Count >= 3)
@@ -2625,18 +2279,15 @@ namespace PhotoMax
         {
             _polyActive = false;
 
-            // **FIX: Hide the start marker**
             if (_polyStartMarker != null) _polyStartMarker.Visibility = Visibility.Collapsed;
 
             if (_polyPts.Count > 2)
             {
-                // Close the polygon by adding first point if not already closed
                 if (_polyPts[0] != _polyPts[^1])
                     _polyPts.Add(_polyPts[0]);
 
                 ShowPolygon();
 
-                // Create geometry and activate selection
                 var sg = new StreamGeometry();
                 using (var ctx = sg.Open())
                 {
@@ -2653,7 +2304,6 @@ namespace PhotoMax
             }
         }
 
-        // Convert transparent-black pixels to transparent-white to avoid black fringing
         private void ConvertTransparentBlackToWhite(Mat bgra)
         {
             if (bgra == null || bgra.Empty()) return;
@@ -2673,18 +2323,15 @@ namespace PhotoMax
 
                     if (a == 0)
                     {
-                        // Fully transparent - set RGB to white to avoid black fringing
-                        data[i + 0] = 255; // B
-                        data[i + 1] = 255; // G
-                        data[i + 2] = 255; // R
-                        // alpha stays 0
+                        data[i + 0] = 255;
+                        data[i + 1] = 255;
+                        data[i + 2] = 255;
                     }
                 }
             }
 
             Marshal.Copy(data, 0, bgra.Data, data.Length);
         }
-
 
         private void HookCropKeys()
         {
@@ -2704,11 +2351,6 @@ namespace PhotoMax
             };
         }
 
-        /* ---------------- helpers for sticky selection translation ---------------- */
-        // Builds a Pbgra32 mask for the current _selectionClip inside the ROI at (x,y,w,h).
-        // Image.cs (inside ImageController)
-        // Find the BuildSelectionMaskBytes_Binary method and replace it with this corrected version:
-
         private byte[] BuildSelectionMaskBytes_Binary(int x, int y, int w, int h, byte threshold)
         {
             if (_selectionClip == null)
@@ -2724,10 +2366,8 @@ namespace PhotoMax
             var dv = new DrawingVisual();
             using (var dc = dv.RenderOpen())
             {
-                // **FIX: Use proper background and antialiasing**
                 dc.DrawRectangle(Brushes.Black, null, new WRect(0, 0, w, h));
 
-                // Translate and draw selection in white
                 dc.PushTransform(new TranslateTransform(-x, -y));
                 dc.DrawGeometry(Brushes.White, null, _selectionClip);
                 dc.Pop();
@@ -2739,7 +2379,6 @@ namespace PhotoMax
             var pixels = new byte[h * stride];
             rtb.CopyPixels(pixels, stride, 0);
 
-            // **FIX: Use proper thresholding based on luminance AND alpha**
             for (int i = 0; i < pixels.Length; i += 4)
             {
                 byte b = pixels[i + 0];
@@ -2747,7 +2386,6 @@ namespace PhotoMax
                 byte r = pixels[i + 2];
                 byte a = pixels[i + 3];
 
-                // Check both color luminance AND alpha
                 int luminance = (r + g + b) / 3;
                 bool inside = (luminance > threshold) && (a > threshold);
 
@@ -2760,146 +2398,10 @@ namespace PhotoMax
             return pixels;
         }
 
-        private void ApplyAlphaMaskToMat_Binary(Mat bgra, byte[] mask, int w, int h)
-        {
-            int step = (int)bgra.Step();
-            var data = new byte[step * h];
-            Marshal.Copy(bgra.Data, data, 0, data.Length);
-
-            int mStride = w * 4;
-            for (int y = 0; y < h; y++)
-            {
-                int rowD = y * step;
-                int rowM = y * mStride;
-                for (int x = 0; x < w; x++)
-                {
-                    int di = rowD + x * 4;
-                    int mi = rowM + x * 4;
-                    byte maskAlpha = mask[mi + 3]; // 0 or 255
-
-                    if (maskAlpha == 0)
-                    {
-                        // **FIX: Outside selection - transparent WHITE (prevents black fringing)**
-                        data[di + 0] = 255; // B = white
-                        data[di + 1] = 255; // G = white
-                        data[di + 2] = 255; // R = white
-                        data[di + 3] = 0; // A = 0 (transparent)
-                    }
-                    else
-                    {
-                        // Inside selection - keep original pixel with full opacity
-                        data[di + 3] = 255;
-                    }
-                }
-            }
-
-            Marshal.Copy(data, 0, bgra.Data, data.Length);
-        }
-
-        private void ClearDocRegionWithMaskToWhite_Binary(int x, int y, int w, int h, byte[] mask)
-        {
-            // Forward to the Mat version using the active layer
-            ClearMatRegionWithMaskToTransparent_Binary(Mat, x, y, w, h, mask);
-        }
-
-        private byte[] BuildSelectionMaskBytes(int x, int y, int w, int h)
-        {
-            if (_selectionClip == null) return new byte[w * h * 4];
-
-            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-            var dv = new DrawingVisual();
-            using (var dc = dv.RenderOpen())
-            {
-                // Shift selection geometry into ROI-local coords
-                dc.PushTransform(new TranslateTransform(-x, -y));
-                dc.DrawGeometry(Brushes.White, null, _selectionClip);
-                dc.Pop();
-            }
-
-            rtb.Render(dv);
-
-            int stride = w * 4;
-            var buf = new byte[h * stride];
-            rtb.CopyPixels(buf, stride, 0);
-            return buf;
-        }
-
-        // Applies alpha from mask (Pbgra32) to the given Bgra Mat (straight alpha expected).
-        private void ApplyAlphaMaskToMat(Mat bgra, byte[] mask, int w, int h)
-        {
-            int step = (int)bgra.Step();
-            var data = new byte[step * h];
-            Marshal.Copy(bgra.Data, data, 0, data.Length);
-
-            int mStride = w * 4;
-            for (int y = 0; y < h; y++)
-            {
-                int rowD = y * step;
-                int rowM = y * mStride;
-                for (int x = 0; x < w; x++)
-                {
-                    int di = rowD + x * 4;
-                    int mi = rowM + x * 4;
-                    byte a = mask[mi + 3];
-                    data[di + 3] = a; // set alpha
-                    if (a == 0)
-                    {
-                        // optional: zero color outside selection (keeps the preview tidy)
-                        data[di + 0] = 0;
-                        data[di + 1] = 0;
-                        data[di + 2] = 0;
-                    }
-                }
-            }
-
-            Marshal.Copy(data, 0, bgra.Data, data.Length);
-        }
-
-        // Uses the selection mask to set ONLY the selected pixels in the doc to white (opaque).
-        private void ClearDocRegionWithMaskToWhite(int x, int y, int w, int h, byte[] mask)
-        {
-            if (Mat == null || Mat.Empty()) return;
-
-            int step = (int)Mat.Step();
-            var dst = new byte[step * Mat.Height];
-            Marshal.Copy(Mat.Data, dst, 0, dst.Length);
-
-            int mStride = w * 4;
-
-            for (int yy = 0; yy < h; yy++)
-            {
-                int iy = y + yy;
-                if (iy < 0 || iy >= Mat.Height) continue;
-
-                int rowD = iy * step;
-                int rowM = yy * mStride;
-
-                for (int xx = 0; xx < w; xx++)
-                {
-                    int ix = x + xx;
-                    if (ix < 0 || ix >= Mat.Width) continue;
-
-                    int di = rowD + ix * 4;
-                    int mi = rowM + xx * 4;
-                    byte a = mask[mi + 3];
-                    if (a == 0) continue;
-
-                    // Clear to TRANSPARENT (alpha = 0)
-                    dst[di + 0] = 0; // B
-                    dst[di + 1] = 0; // G
-                    dst[di + 2] = 0; // R
-                    dst[di + 3] = 0; // A = 0 (fully transparent)
-                }
-            }
-
-            Marshal.Copy(dst, 0, Mat.Data, dst.Length);
-        }
-
         private void TranslateSelectionGeometry(double dx, double dy)
         {
             if (_selectionClip == null) return;
 
-            // Clone to detach & apply translation
             var newClip = _selectionClip.Clone();
             var tg = new TransformGroup();
             if (newClip.Transform != null) tg.Children.Add(newClip.Transform);
@@ -2908,7 +2410,6 @@ namespace PhotoMax
             newClip.Freeze();
             _selectionClip = newClip;
 
-            // Update edge as well
             if (_selectionEdge != null)
             {
                 var newEdge = _selectionEdge.Clone();
@@ -2920,13 +2421,10 @@ namespace PhotoMax
                 _selectionEdge = newEdge;
             }
 
-            // Keep InkCanvas clipping in sync
             _paint.Clip = _selectionClip;
 
-            // Mask now outdated
             MarkSelectionDirty();
 
-            // **FIX: Update the underlying point lists for lasso/polygon**
             if (_lassoPts.Count > 0)
             {
                 for (int i = 0; i < _lassoPts.Count; i++)
@@ -2939,15 +2437,12 @@ namespace PhotoMax
                     _polyPts[i] = new WPoint(_polyPts[i].X + dx, _polyPts[i].Y + dy);
             }
 
-            // Update bounding rectangle if present
             if (_activeSelectionRect is WRect rr && !rr.IsEmpty)
             {
                 var moved = new WRect(rr.X + dx, rr.Y + dy, rr.Width, rr.Height);
                 _activeSelectionRect = moved;
             }
         }
-
-        /* ---------------- low-level helpers ---------------- */
 
         private static BitmapSource MatToBitmapSourceBGRA(Mat m)
         {
@@ -2961,11 +2456,9 @@ namespace PhotoMax
 
             int w = bgra.Width, h = bgra.Height, stride = w * 4;
 
-            // **FIX: Copy pixels to managed array first to avoid color space issues**
             var pixels = new byte[stride * h];
             Marshal.Copy(bgra.Data, pixels, 0, pixels.Length);
 
-            // Create bitmap from managed array with NO color profile
             var bmp = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
             bmp.Freeze();
 
@@ -2975,7 +2468,6 @@ namespace PhotoMax
 
         private static Mat BitmapSourceToMatBGRA(BitmapSource bmp)
         {
-            // **FIX: Copy pixels through managed array to avoid gamma issues**
             var fmt = bmp.Format == PixelFormats.Bgra32
                 ? bmp
                 : new FormatConvertedBitmap(bmp, PixelFormats.Bgra32, null, 0);
@@ -2983,30 +2475,22 @@ namespace PhotoMax
             int w = fmt.PixelWidth, h = fmt.PixelHeight, stride = w * 4;
             var data = new byte[stride * h];
 
-            // Force raw pixel copy without color management
             fmt.CopyPixels(data, stride, 0);
 
-            // **FIX: Convert transparent black pixels to transparent white**
             for (int i = 0; i < data.Length; i += 4)
             {
                 byte a = data[i + 3];
                 if (a == 0)
                 {
-                    // Fully transparent - set RGB to white to prevent black fringing
-                    data[i + 0] = 255; // B
-                    data[i + 1] = 255; // G
-                    data[i + 2] = 255; // R
+                    data[i + 0] = 255;
+                    data[i + 1] = 255;
+                    data[i + 2] = 255;
                 }
             }
 
             var mat = new Mat(h, w, MatType.CV_8UC4);
             Marshal.Copy(data, 0, mat.Data, data.Length);
             return mat;
-        }
-
-        private void AlphaBlendOver(Mat src, int x, int y)
-        {
-            AlphaBlendOverToMat(Mat, src, x, y);
         }
 
         private void AlphaBlendOverToMat(Mat targetMat, Mat src, int x, int y)
@@ -3055,19 +2539,17 @@ namespace PhotoMax
                     byte sr = srcData[si + 2];
                     byte sa = srcData[si + 3];
 
-                    if (sa == 0) continue; // **FIX: Skip fully transparent pixels**
+                    if (sa == 0) continue;
 
                     if (sa == 255)
                     {
-                        // Fully opaque - replace
                         dstData[di + 0] = sb;
                         dstData[di + 1] = sg;
                         dstData[di + 2] = sr;
-                        dstData[di + 3] = srcData[si + 3]; // PRESERVE ALPHA!
+                        dstData[di + 3] = srcData[si + 3];
                     }
                     else
                     {
-                        // **FIX: Proper alpha blending for semi-transparent**
                         double srcA = sa / 255.0;
                         double dstA = dstData[di + 3] / 255.0;
                         double outA = srcA + dstA * (1.0 - srcA);
@@ -3090,9 +2572,6 @@ namespace PhotoMax
         }
     }
 
-    /// <summary>
-    /// Minimal code-only resize dialog with modern dark theme.
-    /// </summary>
     internal sealed class ResizeInlineWindow : WWindow
     {
         private readonly TextBox _wBox = new() { MinWidth = 80, Margin = new Thickness(0, 0, 8, 0) };
@@ -3115,7 +2594,6 @@ namespace PhotoMax
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             ResizeMode = ResizeMode.NoResize;
 
-            // Modern dark theme
             Background = new SolidColorBrush(Color.FromArgb(255, 30, 30, 30));
             Foreground = new SolidColorBrush(Color.FromArgb(255, 243, 243, 243));
 
@@ -3123,15 +2601,14 @@ namespace PhotoMax
             _origH = currentHeight;
 
             var mainGrid = new Grid { Margin = new Thickness(20, 20, 20, 20) };
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Header
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Current size
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Width input
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Height input
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Lock checkbox
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Spacer
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Buttons
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            // Header
             var header = new TextBlock
             {
                 Text = "RESIZE IMAGE",
@@ -3142,7 +2619,6 @@ namespace PhotoMax
             };
             Grid.SetRow(header, 0);
 
-            // Current size info
             var currentSizeText = new TextBlock
             {
                 Text = $"Current size: {currentWidth} × {currentHeight} pixels",
@@ -3152,7 +2628,6 @@ namespace PhotoMax
             };
             Grid.SetRow(currentSizeText, 1);
 
-            // Width input
             var widthPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
             var wLabel = new TextBlock
             {
@@ -3173,7 +2648,6 @@ namespace PhotoMax
             widthPanel.Children.Add(_wBox);
             Grid.SetRow(widthPanel, 2);
 
-            // Height input
             var heightPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
             var hLabel = new TextBlock
             {
@@ -3194,12 +2668,10 @@ namespace PhotoMax
             heightPanel.Children.Add(_hBox);
             Grid.SetRow(heightPanel, 3);
 
-            // Lock aspect ratio checkbox
             _lockAspect.Foreground = Foreground;
             _lockAspect.Margin = new Thickness(0, 0, 0, 0);
             Grid.SetRow(_lockAspect, 4);
 
-            // Buttons
             var buttonPanel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -3235,7 +2707,6 @@ namespace PhotoMax
             buttonPanel.Children.Add(cancelBtn);
             Grid.SetRow(buttonPanel, 6);
 
-            // Add all to grid
             mainGrid.Children.Add(header);
             mainGrid.Children.Add(currentSizeText);
             mainGrid.Children.Add(widthPanel);
@@ -3251,7 +2722,6 @@ namespace PhotoMax
             _wBox.TextChanged += (s, e) => SyncAspect(fromWidth: true);
             _hBox.TextChanged += (s, e) => SyncAspect(fromWidth: false);
 
-            // Focus the width box on open
             Loaded += (s, e) => _wBox.Focus();
         }
 

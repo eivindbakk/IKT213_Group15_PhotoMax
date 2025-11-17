@@ -1,5 +1,3 @@
-// File: MenuHandlers/Shapes.cs
-
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -10,13 +8,11 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using WF = System.Windows.Forms;
 using OpenCvSharp;
-
-// Aliases
 using WpfPoint = System.Windows.Point;
 using WpfRect = System.Windows.Rect;
 using CvPoint = OpenCvSharp.Point;
 using CvSize = OpenCvSharp.Size;
-using WWindow = System.Windows.Window; // avoid clash with OpenCvSharp.Window
+using WWindow = System.Windows.Window;
 
 namespace PhotoMax
 {
@@ -43,7 +39,6 @@ namespace PhotoMax
             ResizeP2
         }
 
-        // ===== Shapes state =====
         private bool _sh_armed = false;
         private bool _sh_pendingCommit = false;
         private Shapes_Kind _sh_kind = Shapes_Kind.Rectangle;
@@ -63,11 +58,9 @@ namespace PhotoMax
 
         private readonly List<Shape> _sh_pendingShapes = new();
 
-        // For resize anchoring (original box at start of resize)
         private WpfRect _sh_boxStart;
         private const double Shapes_MinSize = 1.0;
 
-        // ---------- Menu ----------
         private void Shapes_List_Click(object sender, RoutedEventArgs e)
         {
             var dlg = new ShapesConfigWindow(_sh_kind, _sh_outline, _sh_fill, _sh_strokePx)
@@ -93,37 +86,11 @@ namespace PhotoMax
             }
         }
 
-        // Kept for compatibility; not shown in menu anymore
-        private void Shapes_BakePending_Click(object? sender, RoutedEventArgs e)
-        {
-            var mat = TryGetImageMat_Shapes();
-            if (mat == null || mat.Empty())
-            {
-                MessageBox.Show("Open or create an image first.", "PhotoMax",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
 
-            var host = Shapes_GetHostOrThrow();
-            var toBake = new List<Shape>(_sh_pendingShapes);
-            foreach (var s in toBake)
-            {
-                if (Shapes_TryCommitToImage(s))
-                {
-                    host.Children.Remove(s);
-                    _sh_pendingShapes.Remove(s);
-                }
-            }
-
-            TryForceRefreshView_Shapes();
-        }
-
-        // ---------- Arming / Disarming ----------
         private void Shapes_Arm()
         {
             if (_sh_armed) return;
 
-            // **FIX: Disable move tool if active**
             Tool_DisableMoveToolIfActive();
 
             _sh_host = Shapes_FindHost();
@@ -147,24 +114,22 @@ namespace PhotoMax
                 StatusText.Content =
                     "Shapes: drag to draw; drag to move; drag corners to resize; Enter=commit, Esc=cancel.";
         }
-        
+
         private void Tool_DisableMoveToolIfActive()
         {
-            // Access the _moveToolArmed field and disable if needed
-            var field = GetType().GetField("_moveToolArmed", 
-                System.Reflection.BindingFlags.Instance | 
+            var field = GetType().GetField("_moveToolArmed",
+                System.Reflection.BindingFlags.Instance |
                 System.Reflection.BindingFlags.NonPublic);
-    
+
             if (field != null)
             {
                 bool isArmed = (bool)(field.GetValue(this) ?? false);
                 if (isArmed)
                 {
                     field.SetValue(this, false);
-            
-                    // Call unhook method
+
                     var unhookMethod = GetType().GetMethod("UnhookMoveToolPanEvents",
-                        System.Reflection.BindingFlags.Instance | 
+                        System.Reflection.BindingFlags.Instance |
                         System.Reflection.BindingFlags.NonPublic);
                     unhookMethod?.Invoke(this, null);
                 }
@@ -173,7 +138,6 @@ namespace PhotoMax
 
         private void Shapes_Disarm()
         {
-            // If there's a floating selection, commit it first
             if (_img != null && _img.IsFloatingActive)
             {
                 _img.CommitFloatingPaste();
@@ -194,7 +158,6 @@ namespace PhotoMax
             _sh_host.Cursor = Cursors.Arrow;
         }
 
-        // ---------- Mouse / Keyboard ----------
         private void Shapes_MouseDown(object? sender, MouseButtonEventArgs e)
         {
             if (_sh_host == null) return;
@@ -202,10 +165,8 @@ namespace PhotoMax
 
             var pos = e.GetPosition(_sh_host);
 
-            // If a shape is pending commit, manipulate it instead of creating a new one
             if (_sh_active != null && _sh_pendingCommit)
             {
-                // Line: endpoints or move
                 if (_sh_active is Line ln)
                 {
                     var p1 = new WpfPoint(ln.X1, ln.Y1);
@@ -233,7 +194,6 @@ namespace PhotoMax
                 }
                 else
                 {
-                    // Rect/Ellipse: corner handles
                     if (Shapes_TryHitHandle(pos, out var mode))
                     {
                         if (_sh_active != null)
@@ -252,7 +212,6 @@ namespace PhotoMax
                         return;
                     }
 
-                    // Inside -> move
                     double left = Canvas.GetLeft(_sh_active);
                     double top = Canvas.GetTop(_sh_active);
                     double w = _sh_active.Width;
@@ -270,13 +229,11 @@ namespace PhotoMax
                     }
                 }
 
-                // Clicked outside pending shape: ignore (keep shape)
                 return;
             }
 
             if (!_sh_armed) return;
 
-            // Begin creating a new shape
             _sh_dragMode = Shapes_Drag.Create;
             _sh_dragStart = pos;
 
@@ -312,7 +269,6 @@ namespace PhotoMax
         {
             if (_sh_host == null) return;
 
-            // Hover feedback: show move cursor when over body of pending shape
             if (_sh_pendingCommit && _sh_active != null && _sh_dragMode == Shapes_Drag.None)
             {
                 var hoverPos = e.GetPosition(_sh_host);
@@ -405,7 +361,6 @@ namespace PhotoMax
 
                 var shape = _sh_active;
 
-                // Check if anything meaningful was drawn
                 bool hasArea = true;
                 if (shape is Line ln)
                 {
@@ -420,7 +375,6 @@ namespace PhotoMax
 
                 if (hasArea)
                 {
-                    // Keep as live overlay so user can move/resize before committing
                     _sh_pendingCommit = true;
                     Shapes_AddHandles();
                     if (StatusText != null)
@@ -429,7 +383,6 @@ namespace PhotoMax
                 }
                 else
                 {
-                    // Nothing drawn -> remove overlay
                     _sh_host.Children.Remove(shape);
                     Shapes_ClearActive();
                     _sh_pendingCommit = false;
@@ -501,7 +454,6 @@ namespace PhotoMax
             }
         }
 
-        // ---------- Preview + handles ----------
         private void Shapes_UpdateRectPreview(Shape s, WpfPoint start, WpfPoint curr, bool keepSquare)
         {
             double left = Math.Min(start.X, curr.X);
@@ -673,7 +625,6 @@ namespace PhotoMax
             Canvas.SetTop(r, y - 4);
             Panel.SetZIndex(r, 10001);
 
-            // Down/up handled via Shapes_MouseDown / Shapes_MouseUp on host
             r.PreviewMouseLeftButtonDown += (_, e) => { e.Handled = false; };
             r.PreviewMouseLeftButtonUp += (_, e) => { e.Handled = false; };
 
@@ -697,7 +648,6 @@ namespace PhotoMax
             Canvas.SetTop(e, y - 4);
             Panel.SetZIndex(e, 10001);
 
-            // Actual hit/drag handled in Shapes_MouseDown (for the line)
             e.PreviewMouseLeftButtonDown += (_, ev) => { ev.Handled = false; };
             e.PreviewMouseLeftButtonUp += (_, ev) => { ev.Handled = false; };
 
@@ -744,13 +694,11 @@ namespace PhotoMax
             if (_sh_active == null)
                 return;
 
-            // Starting rectangle when the drag began
             double left0 = _sh_boxStart.X;
             double top0 = _sh_boxStart.Y;
             double w0 = _sh_boxStart.Width;
             double h0 = _sh_boxStart.Height;
 
-            // Fallback if _sh_boxStart was not initialised for some reason
             if (w0 <= 0 || h0 <= 0)
             {
                 left0 = Canvas.GetLeft(_sh_active);
@@ -759,27 +707,26 @@ namespace PhotoMax
                 h0 = _sh_active.Height;
             }
 
-            // Choose fixed anchor corner (opposite of the dragged handle)
             double anchorX, anchorY;
             switch (mode)
             {
                 case Shapes_Drag.ResizeNW:
-                    // dragging NW corner -> anchor is original bottom-right
+
                     anchorX = left0 + w0;
                     anchorY = top0 + h0;
                     break;
                 case Shapes_Drag.ResizeNE:
-                    // dragging NE corner -> anchor is original bottom-left
+
                     anchorX = left0;
                     anchorY = top0 + h0;
                     break;
                 case Shapes_Drag.ResizeSW:
-                    // dragging SW corner -> anchor is original top-right
+
                     anchorX = left0 + w0;
                     anchorY = top0;
                     break;
                 case Shapes_Drag.ResizeSE:
-                    // dragging SE corner -> anchor is original top-left
+
                     anchorX = left0;
                     anchorY = top0;
                     break;
@@ -787,13 +734,11 @@ namespace PhotoMax
                     return;
             }
 
-            // Vector from anchor to mouse
             double dx = curr.X - anchorX;
             double dy = curr.Y - anchorY;
 
             if (keepSquare)
             {
-                // Square: side is max of |dx|,|dy|, direction comes from quadrant of (dx,dy)
                 double side = Math.Max(Math.Abs(dx), Math.Abs(dy));
                 if (side < Shapes_MinSize)
                     side = Shapes_MinSize;
@@ -816,7 +761,6 @@ namespace PhotoMax
             }
             else
             {
-                // Free rectangle: width/height from anchor to mouse, no directional clamping
                 double w = Math.Abs(dx);
                 double h = Math.Abs(dy);
 
@@ -901,7 +845,6 @@ namespace PhotoMax
                 _sh_host.Cursor = Cursors.Arrow;
         }
 
-        // ---------- Hit testing for body ----------
         private bool Shapes_HitShapeBody(Shape shape, WpfPoint pos)
         {
             if (shape is Line ln)
@@ -933,7 +876,6 @@ namespace PhotoMax
             return rect.Contains(pos);
         }
 
-        // ---------- Element + commit ----------
         private Shape Shapes_CreateElement(Shapes_Kind kind)
         {
             Brush stroke = new SolidColorBrush(_sh_outline);
@@ -971,7 +913,6 @@ namespace PhotoMax
             if (mat == null || mat.Empty())
                 return false;
 
-            // Save undo state before committing shape
             SaveUndoState("Shape");
 
             Scalar outline = new Scalar(_sh_outline.B, _sh_outline.G, _sh_outline.R, _sh_outline.A);
@@ -1028,7 +969,6 @@ namespace PhotoMax
             return true;
         }
 
-        // ---------- Coords (Artboard space == image pixels) ----------
         private System.Drawing.Point CanvasToImagePx_Shapes(WpfPoint p)
         {
             int ix = (int)Math.Round(p.X);
@@ -1052,7 +992,6 @@ namespace PhotoMax
             return Math.Sqrt(dx * dx + dy * dy);
         }
 
-        // ---------- Host discovery ----------
         private Canvas? Shapes_FindHost()
         {
             var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -1068,13 +1007,7 @@ namespace PhotoMax
             return null;
         }
 
-        private Canvas Shapes_GetHostOrThrow()
-        {
-            return _sh_host ?? Shapes_FindHost() ??
-                throw new InvalidOperationException("Shapes host not found.");
-        }
 
-        // ---------- Image access shims ----------
         private object? TryGetImageController_Shapes()
         {
             var names = new[]
@@ -1197,14 +1130,13 @@ namespace PhotoMax
         }
     }
 
-    // ========== SHAPES CONFIG WINDOW (Dark Theme) ==========
     internal sealed class ShapesConfigWindow : WWindow
     {
         public PhotoMax.MainWindow.Shapes_Kind SelectedKind { get; private set; }
         public Color OutlineColor { get; private set; }
         public Color FillColor { get; private set; }
         public int StrokeThickness { get; private set; }
-        
+
         private Color _fillBaseColor;
 
         private readonly RadioButton _rectRadio;
@@ -1216,9 +1148,8 @@ namespace PhotoMax
         private readonly TextBlock _fillLabel;
         private readonly Slider _thicknessSlider;
         private readonly TextBlock _thicknessValue;
-        private Slider? _fillOpacitySlider; // **NEW**
-        
-        
+        private Slider? _fillOpacitySlider;
+
         public ShapesConfigWindow(
             PhotoMax.MainWindow.Shapes_Kind currentKind,
             Color currentOutline,
@@ -1229,9 +1160,8 @@ namespace PhotoMax
             OutlineColor = currentOutline;
             FillColor = currentFill;
             StrokeThickness = currentThickness;
-    
-            // **NEW: Remember base color (default to white if fully transparent)**
-            _fillBaseColor = currentFill.A > 0 
+
+            _fillBaseColor = currentFill.A > 0
                 ? Color.FromRgb(currentFill.R, currentFill.G, currentFill.B)
                 : Colors.White;
 
@@ -1241,7 +1171,6 @@ namespace PhotoMax
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             ResizeMode = ResizeMode.NoResize;
 
-            // Apply dark theme-ish
             Background = new SolidColorBrush(Color.FromRgb(30, 30, 30));
             Foreground = new SolidColorBrush(Color.FromRgb(243, 243, 243));
 
@@ -1250,7 +1179,6 @@ namespace PhotoMax
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            // === SHAPE TYPE SECTION ===
             var shapePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
 
             var shapeHeader = new TextBlock
@@ -1289,7 +1217,6 @@ namespace PhotoMax
             shapePanel.Children.Add(_ellipseRadio);
             shapePanel.Children.Add(_lineRadio);
 
-            // === COLORS SECTION ===
             var colorPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
 
             var colorHeader = new TextBlock
@@ -1302,7 +1229,6 @@ namespace PhotoMax
             };
             colorPanel.Children.Add(colorHeader);
 
-// Outline color row
             var outlineRow = new Grid { Margin = new Thickness(0, 4, 0, 4) };
             outlineRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
             outlineRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1351,7 +1277,6 @@ namespace PhotoMax
             colorPanel.Children.Add(outlineRow);
             colorPanel.Children.Add(_outlineLabel);
 
-// Fill color row
             var fillRow = new Grid { Margin = new Thickness(0, 8, 0, 4) };
             fillRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
             fillRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1400,13 +1325,11 @@ namespace PhotoMax
             colorPanel.Children.Add(fillRow);
             colorPanel.Children.Add(_fillLabel);
 
-
-            // **NEW: Fill Opacity Slider**
             var opacityRow = new Grid { Margin = new Thickness(100, 4, 0, 0) };
             opacityRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             opacityRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
 
-            _fillOpacitySlider = new Slider // **CHANGED: assigned to field**
+            _fillOpacitySlider = new Slider
             {
                 Minimum = 0,
                 Maximum = 255,
@@ -1429,10 +1352,9 @@ namespace PhotoMax
             _fillOpacitySlider.ValueChanged += (s, e) =>
             {
                 byte alpha = (byte)_fillOpacitySlider.Value;
-    
-                // **FIX: Always use the remembered base color**
+
                 FillColor = Color.FromArgb(alpha, _fillBaseColor.R, _fillBaseColor.G, _fillBaseColor.B);
-    
+
                 UpdateFillPreview();
                 _fillLabel.Text = FormatColorLabel(FillColor, isFill: true);
                 opacityValue.Text = alpha == 0 ? "Transp." : $"Alpha: {alpha}";
@@ -1446,7 +1368,6 @@ namespace PhotoMax
 
             colorPanel.Children.Add(opacityRow);
 
-            // === STROKE THICKNESS SECTION ===
             var strokePanel = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
 
             var strokeHeader = new TextBlock
@@ -1494,7 +1415,6 @@ namespace PhotoMax
 
             strokePanel.Children.Add(sliderRow);
 
-            // === BUTTONS ===
             var buttonPanel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -1534,7 +1454,6 @@ namespace PhotoMax
             buttonPanel.Children.Add(okBtn);
             buttonPanel.Children.Add(cancelBtn);
 
-            // === ASSEMBLE LAYOUT ===
             var contentStack = new StackPanel();
             contentStack.Children.Add(shapePanel);
             contentStack.Children.Add(colorPanel);
@@ -1577,16 +1496,14 @@ namespace PhotoMax
 
             if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
-                // **FIX: Remember the base color and set to FULLY OPAQUE (255)**
                 _fillBaseColor = Color.FromRgb(dlg.Color.R, dlg.Color.G, dlg.Color.B);
                 FillColor = Color.FromArgb(255, dlg.Color.R, dlg.Color.G, dlg.Color.B);
-        
-                // **FIX: Reset slider to 255 (fully opaque)**
+
                 if (_fillOpacitySlider != null)
                 {
                     _fillOpacitySlider.Value = 255;
                 }
-        
+
                 UpdateFillPreview();
                 _fillLabel.Text = FormatColorLabel(FillColor, isFill: true);
             }
@@ -1596,7 +1513,6 @@ namespace PhotoMax
         {
             if (FillColor.A == 0)
             {
-                // Simple checkerboard pattern for transparency
                 var drawingGroup = new DrawingGroup();
                 var gray1 = new SolidColorBrush(Color.FromRgb(180, 180, 180));
                 var gray2 = new SolidColorBrush(Color.FromRgb(140, 140, 140));
@@ -1633,157 +1549,6 @@ namespace PhotoMax
                 return $"RGB({c.R}, {c.G}, {c.B})";
 
             return $"RGB({c.R}, {c.G}, {c.B}) • Alpha: {c.A}";
-        }
-    }
-
-// ========== FILL OPACITY PICKER WINDOW ==========
-    internal sealed class FillOpacityWindow : WWindow
-    {
-        public Color ResultColor { get; private set; }
-
-        private readonly Slider _opacitySlider;
-        private readonly TextBlock _opacityValue;
-        private Color _baseColor;
-        private byte _alpha = 255;
-
-        public FillOpacityWindow(Color currentFill)
-        {
-            Title = "Fill Color & Opacity";
-            Width = 350;
-            Height = 200;
-            WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            ResizeMode = ResizeMode.NoResize;
-
-            Background = new SolidColorBrush(Color.FromRgb(30, 30, 30));
-            Foreground = new SolidColorBrush(Color.FromRgb(243, 243, 243));
-
-            // Extract base color and alpha from current fill
-            _baseColor = currentFill.A > 0 ? currentFill : Color.FromRgb(255, 255, 255);
-            _alpha = currentFill.A > 0 ? currentFill.A : (byte)255;
-            ResultColor = Color.FromArgb(_alpha, _baseColor.R, _baseColor.G, _baseColor.B);
-
-            var mainGrid = new Grid { Margin = new Thickness(20) };
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            // Color picker button
-            var colorBtn = new Button
-            {
-                Content = "Choose Color...",
-                Padding = new Thickness(12, 8, 12, 8),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Margin = new Thickness(0, 0, 0, 20)
-            };
-            colorBtn.Click += ColorBtn_Click;
-            Grid.SetRow(colorBtn, 0);
-
-            // Opacity slider
-            var opacityPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
-
-            var opacityHeader = new TextBlock
-            {
-                Text = "OPACITY",
-                FontSize = 11,
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(176, 176, 176)),
-                Margin = new Thickness(0, 0, 0, 8)
-            };
-            opacityPanel.Children.Add(opacityHeader);
-
-            var sliderRow = new Grid();
-            sliderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            sliderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
-
-            _opacitySlider = new Slider
-            {
-                Minimum = 1,
-                Maximum = 255,
-                Value = _alpha,
-                TickFrequency = 1,
-                IsSnapToTickEnabled = true,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            _opacitySlider.ValueChanged += (s, e) =>
-            {
-                _alpha = (byte)_opacitySlider.Value;
-                ResultColor = Color.FromArgb(_alpha, _baseColor.R, _baseColor.G, _baseColor.B);
-                _opacityValue.Text = $"{_alpha}";
-            };
-            Grid.SetColumn(_opacitySlider, 0);
-
-            _opacityValue = new TextBlock
-            {
-                Text = $"{_alpha}",
-                VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Foreground = Foreground,
-                Margin = new Thickness(8, 0, 0, 0)
-            };
-            Grid.SetColumn(_opacityValue, 1);
-
-            sliderRow.Children.Add(_opacitySlider);
-            sliderRow.Children.Add(_opacityValue);
-            opacityPanel.Children.Add(sliderRow);
-
-            Grid.SetRow(opacityPanel, 1);
-
-            // Buttons
-            var buttonPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Margin = new Thickness(0, 20, 0, 0)
-            };
-
-            var okBtn = new Button
-            {
-                Content = "OK",
-                Width = 80,
-                Padding = new Thickness(12, 6, 12, 6),
-                Margin = new Thickness(0, 0, 8, 0),
-                IsDefault = true
-            };
-            okBtn.Click += (s, e) =>
-            {
-                DialogResult = true;
-                Close();
-            };
-
-            var cancelBtn = new Button
-            {
-                Content = "Cancel",
-                Width = 80,
-                Padding = new Thickness(12, 6, 12, 6),
-                IsCancel = true
-            };
-
-            buttonPanel.Children.Add(okBtn);
-            buttonPanel.Children.Add(cancelBtn);
-            Grid.SetRow(buttonPanel, 3);
-
-            mainGrid.Children.Add(colorBtn);
-            mainGrid.Children.Add(opacityPanel);
-            mainGrid.Children.Add(buttonPanel);
-
-            Content = mainGrid;
-        }
-
-        private void ColorBtn_Click(object sender, RoutedEventArgs e)
-        {
-            using var dlg = new System.Windows.Forms.ColorDialog
-            {
-                AllowFullOpen = true,
-                FullOpen = true,
-                Color = System.Drawing.Color.FromArgb(_baseColor.R, _baseColor.G, _baseColor.B)
-            };
-
-            if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-            {
-                _baseColor = Color.FromRgb(dlg.Color.R, dlg.Color.G, dlg.Color.B);
-                ResultColor = Color.FromArgb(_alpha, _baseColor.R, _baseColor.G, _baseColor.B);
-            }
         }
     }
 }

@@ -14,7 +14,6 @@ namespace PhotoMax
     {
         private void File_New_Click(object sender, RoutedEventArgs e)
         {
-            // Check for unsaved changes before creating new document
             if (_hasUnsavedChanges)
             {
                 var result = MessageBox.Show(
@@ -26,32 +25,29 @@ namespace PhotoMax
                 if (result == MessageBoxResult.Yes)
                 {
                     File_Save_Click(sender, e);
-                    // If user cancelled the save dialog, don't proceed
+
                     if (_hasUnsavedChanges) return;
                 }
                 else if (result == MessageBoxResult.Cancel)
                 {
-                    return; // Don't create new document
+                    return;
                 }
             }
 
-            // Clear the canvas
             ResetCanvas();
-            
-            // Reset file tracking
+
             _currentFilePath = null;
             _hasUnsavedChanges = false;
             _totalStrokesSinceLastSave = 0;
-            // Clear undo/redo history
+
             _undoRedoManager?.Clear();
             UpdateUndoRedoMenuItems();
-            
+
             StatusText.Content = "New document created";
         }
 
         private void ResetCanvas()
         {
-            // Reset underlying document to a blank 1280x720 BGRA image and refresh view
             try
             {
                 if (_img != null)
@@ -68,14 +64,12 @@ namespace PhotoMax
             }
             finally
             {
-                // Clear all ink strokes
                 PaintCanvas.Strokes.Clear();
             }
         }
 
         private void File_Open_Click(object sender, RoutedEventArgs e)
         {
-            // Check for unsaved changes
             if (_hasUnsavedChanges)
             {
                 var result = MessageBox.Show(
@@ -87,11 +81,11 @@ namespace PhotoMax
                 if (result == MessageBoxResult.Yes)
                 {
                     File_Save_Click(sender, e);
-                    if (_hasUnsavedChanges) return; // User cancelled save
+                    if (_hasUnsavedChanges) return;
                 }
                 else if (result == MessageBoxResult.Cancel)
                 {
-                    return; // Don't open new image
+                    return;
                 }
             }
 
@@ -105,7 +99,6 @@ namespace PhotoMax
             {
                 try
                 {
-                    // Load image using OpenCvSharp and ensure BGRA format for the document
                     using (Mat src = Cv2.ImRead(dlg.FileName, ImreadModes.Unchanged))
                     {
                         if (src.Empty())
@@ -139,29 +132,25 @@ namespace PhotoMax
 
                         using (bgra)
                         {
-                            // Clear existing strokes
                             PaintCanvas.Strokes.Clear();
 
-                            // Update centralized document so all tools/filters operate on the same image
                             if (_img != null)
                             {
                                 _img.Layers_SetSingleFromMat(bgra.Clone());
                             }
                             else
                             {
-                                // Fallback for safety
                                 ImageView.Source = bgra.ToBitmapSource();
                                 SetArtboardSize(bgra.Width, bgra.Height);
                             }
 
-                            // Update tracking
                             _currentFilePath = dlg.FileName;
                             _hasUnsavedChanges = false;
-                            
+
                             _undoRedoManager?.Clear();
                             UpdateUndoRedoMenuItems();
-                            
-                            _totalStrokesSinceLastSave = 0; // **ADD THIS**
+
+                            _totalStrokesSinceLastSave = 0;
                             StatusText.Content =
                                 $"Opened: {Path.GetFileName(dlg.FileName)} ({bgra.Width}x{bgra.Height})";
                         }
@@ -177,19 +166,17 @@ namespace PhotoMax
 
         private void File_Save_Click(object sender, RoutedEventArgs e)
         {
-            // If no current file, prompt for location (like Save As)
             if (string.IsNullOrEmpty(_currentFilePath))
             {
                 File_SaveAs_Click(sender, e);
                 return;
             }
 
-            // Save to existing file without prompting
             try
             {
                 SaveCanvasToFile(_currentFilePath);
                 _hasUnsavedChanges = false;
-                _totalStrokesSinceLastSave = 0; // **ADD THIS**
+                _totalStrokesSinceLastSave = 0;
                 StatusText.Content = $"Saved: {Path.GetFileName(_currentFilePath)}";
             }
             catch (Exception ex)
@@ -199,21 +186,16 @@ namespace PhotoMax
             }
         }
 
-
         private void SaveCanvasToFile(string filename)
         {
-            // Get the size of the canvas
             double width = Artboard.ActualWidth;
             double height = Artboard.ActualHeight;
 
-            // Create a render target bitmap to capture the canvas (image + strokes)
             RenderTargetBitmap renderBitmap = new RenderTargetBitmap(
                 (int)width, (int)height, 96, 96, PixelFormats.Pbgra32);
 
-            // Render the Artboard (which includes ImageView and PaintCanvas)
             renderBitmap.Render(Artboard);
 
-            // Choose encoder based on file extension
             BitmapEncoder encoder;
             string ext = System.IO.Path.GetExtension(filename).ToLower();
 
@@ -227,13 +209,11 @@ namespace PhotoMax
 
             encoder.Frames.Add(BitmapFrame.Create(renderBitmap));
 
-            // Save to file
             using (FileStream stream = new FileStream(filename, FileMode.Create))
             {
                 encoder.Save(stream);
             }
         }
-
 
         private void File_SaveAs_Click(object sender, RoutedEventArgs e)
         {
@@ -255,7 +235,7 @@ namespace PhotoMax
                     SaveCanvasToFile(dlg.FileName);
                     _currentFilePath = dlg.FileName;
                     _hasUnsavedChanges = false;
-                    _totalStrokesSinceLastSave = 0; // **ADD THIS**
+                    _totalStrokesSinceLastSave = 0;
                     StatusText.Content = $"Saved: {Path.GetFileName(_currentFilePath)}";
                 }
                 catch (Exception ex)
@@ -272,19 +252,16 @@ namespace PhotoMax
             {
                 StringBuilder props = new StringBuilder();
 
-                // Check if we have an image document
                 bool hasImage = _img?.Doc?.Image != null && !_img.Doc.Image.Empty();
 
                 if (hasImage)
                 {
-                    // Get image dimensions from the actual document
                     var doc = _img.Doc.Image;
                     props.AppendLine($"Dimensions: {doc.Width} x {doc.Height} pixels");
                     props.AppendLine($"Channels: {doc.Channels()}");
                     props.AppendLine($"Depth: {doc.Depth()}");
                     props.AppendLine($"Type: {doc.Type()}");
 
-                    // Determine color space
                     string colorSpace = doc.Channels() switch
                     {
                         1 => "Grayscale",
@@ -294,7 +271,6 @@ namespace PhotoMax
                     };
                     props.AppendLine($"Color Space: {colorSpace}");
 
-                    // DPI info from ImageView
                     BitmapSource? bitmapSource = ImageView.Source as BitmapSource;
                     if (bitmapSource != null)
                     {
@@ -302,7 +278,6 @@ namespace PhotoMax
                         props.AppendLine($"Format: {bitmapSource.Format}");
                     }
 
-                    // Layer information
                     props.AppendLine();
                     if (_img?.Layers_AllNames != null)
                     {
@@ -316,7 +291,6 @@ namespace PhotoMax
                     props.AppendLine($"Canvas Size: {Artboard.Width:F0} x {Artboard.Height:F0} pixels");
                 }
 
-                // File information
                 props.AppendLine();
                 if (!string.IsNullOrEmpty(_currentFilePath) && File.Exists(_currentFilePath))
                 {
@@ -332,7 +306,6 @@ namespace PhotoMax
                     props.AppendLine("File: [Unsaved]");
                 }
 
-                // **STROKE INFORMATION - THIS WAS MISSING!**
                 props.AppendLine();
                 props.AppendLine($"Brush Strokes: {TotalStrokesSinceLastSave}");
                 props.AppendLine($"Modified: {(_hasUnsavedChanges ? "Yes" : "No")}");
@@ -373,7 +346,7 @@ namespace PhotoMax
                 if (result == MessageBoxResult.Yes)
                 {
                     File_Save_Click(sender, e);
-                    // Only close if save was successful (changes were cleared)
+
                     if (!_hasUnsavedChanges)
                     {
                         Close();
@@ -383,7 +356,6 @@ namespace PhotoMax
                 {
                     Close();
                 }
-                // Cancel = do nothing, stay in the app
             }
             else
             {

@@ -20,13 +20,12 @@ namespace PhotoMax
             InitializeComponent();
             GridColor = initialColor;
 
-            // Init slider and textbox from alpha
             double opacityPercent = Math.Round(GridColor.A * 100.0 / 255.0);
             OpacitySlider.Value = opacityPercent;
             OpacityTextBox.Text = $"{(int)opacityPercent}%";
-            OpacityLabel.Text = GridColor.A == 0 ? "Transparent (hidden)" : 
-                               GridColor.A == 255 ? "Fully opaque" : 
-                               $"{(int)opacityPercent}% opacity";
+            OpacityLabel.Text = GridColor.A == 0 ? "Transparent (hidden)" :
+                GridColor.A == 255 ? "Fully opaque" :
+                $"{(int)opacityPercent}% opacity";
 
             UpdatePreview();
         }
@@ -65,16 +64,15 @@ namespace PhotoMax
 
         private void ChangeColor_Click(object sender, RoutedEventArgs e)
         {
-            using var dlg = new WF.ColorDialog 
-            { 
-                AllowFullOpen = true, 
-                FullOpen = true, 
-                Color = System.Drawing.Color.FromArgb(GridColor.R, GridColor.G, GridColor.B) 
+            using var dlg = new WF.ColorDialog
+            {
+                AllowFullOpen = true,
+                FullOpen = true,
+                Color = System.Drawing.Color.FromArgb(GridColor.R, GridColor.G, GridColor.B)
             };
-            
+
             if (dlg.ShowDialog() == WF.DialogResult.OK)
             {
-                // Keep the current alpha, update RGB
                 GridColor = Color.FromArgb(GridColor.A, dlg.Color.R, dlg.Color.G, dlg.Color.B);
                 UpdatePreview();
             }
@@ -87,20 +85,19 @@ namespace PhotoMax
 
             byte a = (byte)Math.Max(0, Math.Min(255, Math.Round(255.0 * e.NewValue / 100.0)));
             GridColor = Color.FromArgb(a, GridColor.R, GridColor.G, GridColor.B);
-            
+
             int percent = (int)e.NewValue;
             OpacityTextBox.Text = $"{percent}%";
-            OpacityLabel.Text = a == 0 ? "Transparent (hidden)" : 
-                               a == 255 ? "Fully opaque" : 
-                               $"{percent}% opacity";
-            
+            OpacityLabel.Text = a == 0 ? "Transparent (hidden)" :
+                a == 255 ? "Fully opaque" :
+                $"{percent}% opacity";
+
             UpdatePreview();
             _updatingFromSlider = false;
         }
 
         private void OpacityTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
         {
-            // Only allow digits and % symbol
             e.Handled = !Regex.IsMatch(e.Text, @"^[0-9%]+$");
         }
 
@@ -110,18 +107,17 @@ namespace PhotoMax
             _updatingFromTextBox = true;
 
             string text = OpacityTextBox.Text.Replace("%", "").Trim();
-            
+
             if (int.TryParse(text, out int value))
             {
                 value = Math.Clamp(value, 0, 100);
                 OpacitySlider.Value = value;
-                
-                // Update display
+
                 byte a = (byte)Math.Round(255.0 * value / 100.0);
                 GridColor = Color.FromArgb(a, GridColor.R, GridColor.G, GridColor.B);
-                OpacityLabel.Text = a == 0 ? "Transparent (hidden)" : 
-                                   a == 255 ? "Fully opaque" : 
-                                   $"{value}% opacity";
+                OpacityLabel.Text = a == 0 ? "Transparent (hidden)" :
+                    a == 255 ? "Fully opaque" :
+                    $"{value}% opacity";
                 UpdatePreview();
             }
 

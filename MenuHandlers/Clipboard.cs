@@ -1,4 +1,3 @@
-// File: MenuHandlers/Clipboard.cs
 using System.Windows;
 
 namespace PhotoMax
