@@ -452,6 +452,12 @@ namespace PhotoMax
             if (_img == null || _img.Doc == null) return;
             EnsureLiveOverlayBitmap();
 
+            // Save undo state before starting a new stroke (only once per stroke)
+            if (!_isDrawing)
+            {
+                SaveUndoState(_eraseMode ? "Erase" : "Brush");
+            }
+
             // **FIX: Rebuild selection mask ONCE at stroke start**
             if (HasSelectionClip() && _img != null)
             {
@@ -1464,6 +1470,9 @@ namespace PhotoMax
                 return;
             }
 
+            // Save undo state before committing text
+            SaveUndoState("Text");
+
             try
             {
                 var grid = new Grid
@@ -1614,6 +1623,9 @@ namespace PhotoMax
         {
             if (_img?.Mat == null || _img.Mat.Empty()) return;
             EndLayerPreview(apply: false);
+
+            // Save undo state before starting filter preview
+            SaveUndoState(mode + " Filter");
 
             _lpMode = mode;
             _lpRunning = true;

@@ -37,12 +37,15 @@ namespace PhotoMax
 
             // Clear the canvas
             ResetCanvas();
-
+            
             // Reset file tracking
             _currentFilePath = null;
             _hasUnsavedChanges = false;
-            _totalStrokesSinceLastSave = 0; // **ADD THIS**
-
+            _totalStrokesSinceLastSave = 0;
+            // Clear undo/redo history
+            _undoRedoManager?.Clear();
+            UpdateUndoRedoMenuItems();
+            
             StatusText.Content = "New document created";
         }
 
@@ -154,6 +157,10 @@ namespace PhotoMax
                             // Update tracking
                             _currentFilePath = dlg.FileName;
                             _hasUnsavedChanges = false;
+                            
+                            _undoRedoManager?.Clear();
+                            UpdateUndoRedoMenuItems();
+                            
                             _totalStrokesSinceLastSave = 0; // **ADD THIS**
                             StatusText.Content =
                                 $"Opened: {Path.GetFileName(dlg.FileName)} ({bgra.Width}x{bgra.Height})";

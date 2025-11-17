@@ -24,6 +24,10 @@
                 <Separator/>
                 <MenuItem Header="_Quit" Click="File_Quit_Click"/>
             </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="_Undo" Click="Edit_Undo_Click" InputGestureText="Ctrl+Z" x:Name="UndoMenuItem"/>
+                <MenuItem Header="_Redo" Click="Edit_Redo_Click" InputGestureText="Ctrl+Y" x:Name="RedoMenuItem"/>
+            </MenuItem>
         </Menu>
 
         <!-- STATUS BAR -->

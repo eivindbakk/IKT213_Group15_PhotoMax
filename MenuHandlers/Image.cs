@@ -77,22 +77,46 @@ namespace PhotoMax
         }
 
         private void Image_Crop_Click(object sender, RoutedEventArgs e)
-            => _img?.CropCommand();
+        {
+            if (_img == null) return;
+            // SaveUndoState will be called inside ApplyCropFromRect when crop is applied
+            _img.CropCommand();
+        }
 
         private void Image_Resize_Click(object sender, RoutedEventArgs e)
-            => _img?.ResizeWithDialog(this);
+        {
+            if (_img == null) return;
+            // SaveUndoState will be called inside ResizeWithDialog after dialog confirmation
+            _img.ResizeWithDialog(this);
+        }
 
         private void Rotate_Right_Click(object sender, RoutedEventArgs e)
-            => _img?.RotateRight90();
+        {
+            if (_img == null) return;
+            SaveUndoState("Rotate Right 90°");
+            _img.RotateRight90();
+        }
 
         private void Rotate_Left_Click(object sender, RoutedEventArgs e)
-            => _img?.RotateLeft90();
+        {
+            if (_img == null) return;
+            SaveUndoState("Rotate Left 90°");
+            _img.RotateLeft90();
+        }
 
         private void Flip_Vert_Click(object sender, RoutedEventArgs e)
-            => _img?.FlipVertical();
+        {
+            if (_img == null) return;
+            SaveUndoState("Flip Vertical");
+            _img.FlipVertical();
+        }
 
         private void Flip_Horiz_Click(object sender, RoutedEventArgs e)
-            => _img?.FlipHorizontal();
+        {
+            if (_img == null) return;
+            SaveUndoState("Flip Horizontal");
+            _img.FlipHorizontal();
+        }
 
         // ---- Selection mini-tab (like Filters) ----
         private void Selection_PaintInside_Click(object sender, RoutedEventArgs e)
@@ -248,6 +272,9 @@ namespace PhotoMax
         
         // Active bitmap target for all pixel-writing tools (Brush/Shapes/Text/Paste)
         public OpenCvSharp.Mat Mat => _layers.ActiveMat;
+
+        // Callback for saving undo state (set by MainWindow)
+        public Action<string>? SaveUndoStateCallback { get; set; }
 
         // Lightweight layer API for MainWindow menu
         public System.Collections.Generic.List<string> Layers_AllNames => _layers.Layers.ConvertAll(l => l.Name);
@@ -552,6 +579,7 @@ namespace PhotoMax
             if (_mode == SelMode.Rect && _activeSelectionRect is not null)
             {
                 BakeStrokesToImage();
+                // SaveUndoState should be called from MainWindow before this method
                 ApplyCropFromRect(_activeSelectionRect.Value);
                 return;
             }
@@ -591,12 +619,36 @@ namespace PhotoMax
             RefreshView();
         }
 
+        /// <summary>
+        /// Restores the active layer's Mat from a snapshot (used for undo/redo).
+        /// </summary>
+        public void RestoreImageState(Mat snapshot)
+        {
+            if (snapshot == null || snapshot.Empty()) return;
+            
+            BakeStrokesToImage(); // Bake any pending strokes first
+            
+            // Replace the active layer's Mat with the snapshot
+            var activeLayer = _layers.Active;
+            if (activeLayer != null)
+            {
+                var oldMat = activeLayer.Mat;
+                activeLayer.Mat = snapshot.Clone(); // Clone to avoid disposing the snapshot
+                oldMat?.Dispose();
+                
+                RefreshView();
+            }
+        }
+
         public void ResizeWithDialog(WWindow owner)
         {
             var dlg = new ResizeInlineWindow(Doc.Width, Doc.Height) { Owner = owner };
             if (dlg.ShowDialog() == true)
             {
                 BakeStrokesToImage();
+                
+                // Save undo state before resizing
+                SaveUndoStateCallback?.Invoke($"Resize to {dlg.ResultWidth}×{dlg.ResultHeight}");
 
                 int oldW = Doc.Width, oldH = Doc.Height;
                 int newW = dlg.ResultWidth, newH = dlg.ResultHeight;
@@ -2113,6 +2165,9 @@ namespace PhotoMax
                 return;
             }
 
+            BakeStrokesToImage();
+            // Save undo state before applying crop
+            SaveUndoStateCallback?.Invoke("Crop");
             _layers.Crop(
                 (int)Math.Floor(r.X),
                 (int)Math.Floor(r.Y),
