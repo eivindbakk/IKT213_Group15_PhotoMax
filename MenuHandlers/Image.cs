@@ -266,10 +266,10 @@ namespace PhotoMax
 
         // --- LAYERS integration ---
         private readonly LayerStack _layers = new LayerStack();
-        
+
         public event Action? SelectionCreated;
         public int Layers_GetActiveIndex() => _layers.ActiveIndex;
-        
+
         // Active bitmap target for all pixel-writing tools (Brush/Shapes/Text/Paste)
         public OpenCvSharp.Mat Mat => _layers.ActiveMat;
 
@@ -279,7 +279,7 @@ namespace PhotoMax
         // Lightweight layer API for MainWindow menu
         public System.Collections.Generic.List<string> Layers_AllNames => _layers.Layers.ConvertAll(l => l.Name);
         public string Layers_ActiveName => _layers.Active.Name;
-        
+
 
         public void Layers_AddBlank()
         {
@@ -625,9 +625,9 @@ namespace PhotoMax
         public void RestoreImageState(Mat snapshot)
         {
             if (snapshot == null || snapshot.Empty()) return;
-            
+
             BakeStrokesToImage(); // Bake any pending strokes first
-            
+
             // Replace the active layer's Mat with the snapshot
             var activeLayer = _layers.Active;
             if (activeLayer != null)
@@ -635,7 +635,7 @@ namespace PhotoMax
                 var oldMat = activeLayer.Mat;
                 activeLayer.Mat = snapshot.Clone(); // Clone to avoid disposing the snapshot
                 oldMat?.Dispose();
-                
+
                 RefreshView();
             }
         }
@@ -646,7 +646,7 @@ namespace PhotoMax
             if (dlg.ShowDialog() == true)
             {
                 BakeStrokesToImage();
-                
+
                 // Save undo state before resizing
                 SaveUndoStateCallback?.Invoke($"Resize to {dlg.ResultWidth}×{dlg.ResultHeight}");
 
@@ -753,15 +753,15 @@ namespace PhotoMax
 
                     if (maskAlpha == 255)
                     {
-                        // **FIX: Copy RGB but FORCE alpha to 255 (fully opaque)**
+                        // Inside selection - copy pixel as-is
                         dstData[di + 0] = srcData[si + 0]; // B
                         dstData[di + 1] = srcData[si + 1]; // G
                         dstData[di + 2] = srcData[si + 2]; // R
-                        dstData[di + 3] = 255; // A = 255 (FORCE OPAQUE)
+                        dstData[di + 3] = srcData[si + 3]; // A
                     }
                     else
                     {
-                        // Outside selection - transparent WHITE
+                        // **CRITICAL FIX: Outside selection - transparent WHITE (not black)**
                         dstData[di + 0] = 255; // B
                         dstData[di + 1] = 255; // G
                         dstData[di + 2] = 255; // R
@@ -1340,11 +1340,11 @@ namespace PhotoMax
 
                     if (maskAlpha == 255)
                     {
-                        // **FIX: Copy RGB but FORCE alpha to 255**
+                        // **FIX: PRESERVE original alpha!**
                         dstData[di + 0] = srcData[si + 0]; // B
                         dstData[di + 1] = srcData[si + 1]; // G
                         dstData[di + 2] = srcData[si + 2]; // R
-                        dstData[di + 3] = 255; // A = 255 (FORCE OPAQUE)
+                        dstData[di + 3] = srcData[si + 3]; // A - KEEP ORIGINAL!
                     }
                     else
                     {
@@ -1546,7 +1546,7 @@ namespace PhotoMax
 
             Mat? src = null;
 
-            // **FIX: Try PNG first (pixel-perfect, no color shift)**
+            // Try PNG first
             if (Clipboard.ContainsData("PNG"))
             {
                 try
@@ -1554,37 +1554,51 @@ namespace PhotoMax
                     var pngData = Clipboard.GetData("PNG");
                     System.IO.MemoryStream? pngStream = null;
 
-                    // Handle both MemoryStream and byte[] formats
                     if (pngData is System.IO.MemoryStream ms)
-                    {
                         pngStream = ms;
-                    }
                     else if (pngData is byte[] bytes)
-                    {
                         pngStream = new System.IO.MemoryStream(bytes);
-                    }
 
                     if (pngStream != null)
                     {
                         pngStream.Position = 0;
-                        var decoder = new PngBitmapDecoder(pngStream,
-                            BitmapCreateOptions.PreservePixelFormat,
-                            BitmapCacheOption.OnLoad); // **FIX: OnLoad instead of Default**
+                        var buffer = new byte[pngStream.Length];
+                        pngStream.Read(buffer, 0, buffer.Length);
 
-                        if (decoder.Frames.Count > 0)
+                        src = Cv2.ImDecode(buffer, ImreadModes.Unchanged);
+
+                        if (src != null && !src.Empty())
                         {
-                            src = BitmapSourceToMatBGRA(decoder.Frames[0]);
+                            if (src.Type() == MatType.CV_8UC3)
+                            {
+                                var bgra = new Mat();
+                                Cv2.CvtColor(src, bgra, ColorConversionCodes.BGR2BGRA);
+                                src.Dispose();
+                                src = bgra;
+                            }
+                            else if (src.Type() != MatType.CV_8UC4)
+                            {
+                                var bgra = new Mat();
+                                Cv2.CvtColor(src, bgra, ColorConversionCodes.GRAY2BGRA);
+                                src.Dispose();
+                                src = bgra;
+                            }
+
+                            // **FIX: Convert transparent black to transparent white IMMEDIATELY**
+                            ConvertTransparentBlackToWhite(src);
+
                             _status.Content = "Pasted from PNG (colors preserved)";
                         }
                     }
                 }
                 catch
                 {
-                    // Fall through to regular image paste
+                    src?.Dispose();
+                    src = null;
                 }
             }
 
-            // Fallback to regular clipboard image
+            // Fallback
             if (src == null)
             {
                 if (!Clipboard.ContainsImage())
@@ -1601,6 +1615,10 @@ namespace PhotoMax
                 }
 
                 src = BitmapSourceToMatBGRA(cb);
+
+                // **FIX: Convert transparent black to transparent white here too**
+                ConvertTransparentBlackToWhite(src);
+
                 _status.Content = "Pasted from clipboard";
             }
 
@@ -1704,7 +1722,8 @@ namespace PhotoMax
                 _paint.Cursor = Cursors.Pen;
 
                 _floatingFromMove = false;
-                _status.Content = "Moved selection placed (still selected) — click Move tool to move again, or press Enter to finalize.";
+                _status.Content =
+                    "Moved selection placed (still selected) — click Move tool to move again, or press Enter to finalize.";
             }
             else
             {
@@ -2967,6 +2986,19 @@ namespace PhotoMax
             // Force raw pixel copy without color management
             fmt.CopyPixels(data, stride, 0);
 
+            // **FIX: Convert transparent black pixels to transparent white**
+            for (int i = 0; i < data.Length; i += 4)
+            {
+                byte a = data[i + 3];
+                if (a == 0)
+                {
+                    // Fully transparent - set RGB to white to prevent black fringing
+                    data[i + 0] = 255; // B
+                    data[i + 1] = 255; // G
+                    data[i + 2] = 255; // R
+                }
+            }
+
             var mat = new Mat(h, w, MatType.CV_8UC4);
             Marshal.Copy(data, 0, mat.Data, data.Length);
             return mat;
@@ -3023,7 +3055,7 @@ namespace PhotoMax
                     byte sr = srcData[si + 2];
                     byte sa = srcData[si + 3];
 
-                    if (sa == 0) continue; // fully transparent - don't touch destination
+                    if (sa == 0) continue; // **FIX: Skip fully transparent pixels**
 
                     if (sa == 255)
                     {
@@ -3031,23 +3063,23 @@ namespace PhotoMax
                         dstData[di + 0] = sb;
                         dstData[di + 1] = sg;
                         dstData[di + 2] = sr;
-                        dstData[di + 3] = sa;
+                        dstData[di + 3] = srcData[si + 3]; // PRESERVE ALPHA!
                     }
                     else
                     {
-                        // Partial transparency - blend
-                        double a = sa / 255.0;
+                        // **FIX: Proper alpha blending for semi-transparent**
+                        double srcA = sa / 255.0;
                         double dstA = dstData[di + 3] / 255.0;
-                        double outA = a + dstA * (1.0 - a);
+                        double outA = srcA + dstA * (1.0 - srcA);
 
                         if (outA > 0)
                         {
-                            dstData[di + 0] = (byte)Math.Clamp((sb * a + dstData[di + 0] * dstA * (1.0 - a)) / outA, 0,
-                                255);
-                            dstData[di + 1] = (byte)Math.Clamp((sg * a + dstData[di + 1] * dstA * (1.0 - a)) / outA, 0,
-                                255);
-                            dstData[di + 2] = (byte)Math.Clamp((sr * a + dstData[di + 2] * dstA * (1.0 - a)) / outA, 0,
-                                255);
+                            dstData[di + 0] =
+                                (byte)Math.Clamp((sb * srcA + dstData[di + 0] * dstA * (1.0 - srcA)) / outA, 0, 255);
+                            dstData[di + 1] =
+                                (byte)Math.Clamp((sg * srcA + dstData[di + 1] * dstA * (1.0 - srcA)) / outA, 0, 255);
+                            dstData[di + 2] =
+                                (byte)Math.Clamp((sr * srcA + dstData[di + 2] * dstA * (1.0 - srcA)) / outA, 0, 255);
                             dstData[di + 3] = (byte)Math.Clamp(outA * 255, 0, 255);
                         }
                     }
@@ -3057,7 +3089,7 @@ namespace PhotoMax
             Marshal.Copy(dstData, 0, targetMat.Data, dstData.Length);
         }
     }
-    
+
     /// <summary>
     /// Minimal code-only resize dialog with modern dark theme.
     /// </summary>
@@ -3258,6 +3290,7 @@ namespace PhotoMax
             DialogResult = true;
         }
     }
+
     internal static class RectExt
     {
         public static double Right(this WRect r) => r.X + r.Width;
