@@ -31,31 +31,20 @@
             <StatusBarItem Content="Ready" x:Name="StatusText"/>
         </StatusBar>
 
-        <!-- MAIN WORKSPACE -->
-        <ScrollViewer x:Name="Scroller"
-                      HorizontalScrollBarVisibility="Auto"
-                      VerticalScrollBarVisibility="Auto"
-                      CanContentScroll="False"
-                      ClipToBounds="True"
-                      PreviewMouseWheel="Scroller_PreviewMouseWheel"
-                      PreviewMouseDown="Scroller_PreviewMouseDown"
-                      PreviewMouseMove="Scroller_PreviewMouseMove"
-                      PreviewMouseUp="Scroller_PreviewMouseUp"
-                      PreviewKeyDown="Scroller_PreviewKeyDown"
-                      PreviewKeyUp="Scroller_PreviewKeyUp">
+        <!-- MAIN WORKSPACE - Grid is NOW OUTSIDE ScrollViewer -->
+        <Grid x:Name="Root">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230"/>   <!-- Left sidebar -->
+                <ColumnDefinition Width="*"/>     <!-- Center canvas -->
+                <ColumnDefinition Width="280"/>   <!-- Right sidebar -->
+            </Grid.ColumnDefinitions>
 
-            <Grid x:Name="Root">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="230"/>   <!-- Left sidebar -->
-                    <ColumnDefinition Width="*"/>     <!-- Center canvas -->
-                    <ColumnDefinition Width="280"/>   <!-- Right sidebar -->
-                </Grid.ColumnDefinitions>
-
-                <!-- ========== LEFT SIDEBAR: COLOR + TOOLS + FILTERS ========== -->
-                <Border Grid.Column="0"
-                        Background="{StaticResource PmPanelBackgroundBrush}"
-                        BorderBrush="{StaticResource PmPanelBorderBrush}"
-                        BorderThickness="0,0,1,0">
+            <!-- ========== LEFT SIDEBAR: FIXED, NO SCROLLING ========== -->
+            <Border Grid.Column="0"
+                    Background="{StaticResource PmPanelBackgroundBrush}"
+                    BorderBrush="{StaticResource PmPanelBorderBrush}"
+                    BorderThickness="0,0,1,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="10">
 
                         <!-- COLOR PICKER -->
@@ -116,7 +105,7 @@
 
                             <Button Click="Colors_BrushSize_Click" ToolTip="Cycle brush size">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="⬚"
+                                    <TextBlock Text="↕"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
                                                Margin="0,0,6,0"/>
@@ -146,7 +135,7 @@
 
                             <Button Click="Shapes_List_Click" ToolTip="Shapes">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="⬚"
+                                    <TextBlock Text="○"
                                                FontSize="14"
                                                Foreground="{StaticResource PmGlyphBrush}"
                                                Margin="0,0,6,0"/>
@@ -216,11 +205,24 @@
                             </Button>
                         </StackPanel>
                     </StackPanel>
-                </Border>
+                </ScrollViewer>
+            </Border>
 
-                <!-- ========== CENTER: ARTBOARD / CANVAS ========== -->
+            <!-- ========== CENTER: SCROLLABLE CANVAS ONLY ========== -->
+            <ScrollViewer x:Name="Scroller"
+                          Grid.Column="1"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto"
+                          CanContentScroll="False"
+                          ClipToBounds="True"
+                          PreviewMouseWheel="Scroller_PreviewMouseWheel"
+                          PreviewMouseDown="Scroller_PreviewMouseDown"
+                          PreviewMouseMove="Scroller_PreviewMouseMove"
+                          PreviewMouseUp="Scroller_PreviewMouseUp"
+                          PreviewKeyDown="Scroller_PreviewKeyDown"
+                          PreviewKeyUp="Scroller_PreviewKeyUp">
+
                 <Border x:Name="Workbench"
-                        Grid.Column="1"
                         Background="{StaticResource PmWindowBackgroundBrush}"
                         Padding="0">
                     <Grid x:Name="Workspace"
@@ -276,185 +278,185 @@
                         </Border>
                     </Grid>
                 </Border>
+            </ScrollViewer>
 
-                <!-- ========== RIGHT SIDEBAR: SELECTION, TRANSFORM, LAYERS, GRID, CLIPBOARD, ZOOM ========== -->
-                <Border Grid.Column="2"
-                        Background="{StaticResource PmPanelBackgroundBrush}"
-                        BorderBrush="{StaticResource PmPanelBorderBrush}"
-                        BorderThickness="1,0,0,0">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel Margin="10">
+            <!-- ========== RIGHT SIDEBAR: FIXED, NO SCROLLING ========== -->
+            <Border Grid.Column="2"
+                    Background="{StaticResource PmPanelBackgroundBrush}"
+                    BorderBrush="{StaticResource PmPanelBorderBrush}"
+                    BorderThickness="1,0,0,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="10">
 
-                            <!-- SELECTION -->
-                            <TextBlock Text="SELECTION"
-                                       FontSize="10"
-                                       Margin="2,0,0,4"
-                                       Foreground="{StaticResource PmSubTextBrush}"
-                                       FontWeight="Bold"/>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Click="Select_Rect_Click" ToolTip="Rectangular selection" Margin="0,0,4,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="▭"
-                                                   FontSize="14"
-                                                   Foreground="{StaticResource PmGlyphBrush}"
-                                                   Margin="0,0,4,0"/>
-                                        <TextBlock Text="Rect"/>
-                                    </StackPanel>
-                                </Button>
-                                <Button Click="Select_Lasso_Click" ToolTip="Free-form (lasso)" Margin="0,0,4,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="◌"
-                                                   FontSize="14"
-                                                   Foreground="{StaticResource PmGlyphBrush}"
-                                                   Margin="0,0,4,0"/>
-                                        <TextBlock Text="Lasso"/>
-                                    </StackPanel>
-                                </Button>
-                                <Button Click="Select_Polygon_Click" ToolTip="Polygon selection">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="△"
-                                                   FontSize="14"
-                                                   Foreground="{StaticResource PmGlyphBrush}"
-                                                   Margin="0,0,4,0"/>
-                                        <TextBlock Text="Poly"/>
-                                    </StackPanel>
-                                </Button>
-                            </StackPanel>
-
-                            <!-- Crop & Resize -->
-                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                <Button Click="Image_Crop_Click" ToolTip="Crop to selection" Margin="0,0,4,0">
-                                    <TextBlock Text="Crop"/>
-                                </Button>
-                                <Button Click="Image_Resize_Click" ToolTip="Resize image">
-                                    <TextBlock Text="Resize"/>
-                                </Button>
-                            </StackPanel>
-
-                            <Separator Margin="0,10,0,8"/>
-
-                            <!-- TRANSFORM (rotate/flip) -->
-                            <TextBlock Text="TRANSFORM"
-                                       FontSize="10"
-                                       Margin="2,0,0,4"
-                                       Foreground="{StaticResource PmSubTextBrush}"
-                                       FontWeight="Bold"/>
-                            <WrapPanel>
-                                <Button Click="Rotate_Right_Click" ToolTip="Rotate right 90°" Margin="0,0,4,4">
-                                    <TextBlock Text="⟳ 90°"/>
-                                </Button>
-                                <Button Click="Rotate_Left_Click" ToolTip="Rotate left 90°" Margin="0,0,4,4">
-                                    <TextBlock Text="⟲ 90°"/>
-                                </Button>
-                                <Button Click="Flip_Vert_Click" ToolTip="Flip vertical" Margin="0,0,4,4">
-                                    <TextBlock Text="Flip V"/>
-                                </Button>
-                                <Button Click="Flip_Horiz_Click" ToolTip="Flip horizontal" Margin="0,0,4,4">
-                                    <TextBlock Text="Flip H"/>
-                                </Button>
-                            </WrapPanel>
-
-                            <Separator Margin="0,10,0,8"/>
-
-                            <!-- LAYERS -->
-                            <TextBlock Text="LAYERS"
-                                       FontSize="10"
-                                       Margin="2,0,0,4"
-                                       Foreground="{StaticResource PmSubTextBrush}"
-                                       FontWeight="Bold"/>
-                            <WrapPanel>
-                                <Button Click="Layers_New_Click" ToolTip="New layer" Margin="0,0,4,4">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="+"
-                                                   FontSize="14"
-                                                   Foreground="{StaticResource PmGlyphBrush}"
-                                                   Margin="0,0,4,0"/>
-                                        <TextBlock Text="New"/>
-                                    </StackPanel>
-                                </Button>
-                                <Button Click="Layers_Load_Click" ToolTip="Load layer" Margin="0,0,4,4">
-                                    <TextBlock Text="Load"/>
-                                </Button>
-                                <Button Click="Layers_Edit_Click" ToolTip="Edit layer" Margin="0,0,4,4">
-                                    <TextBlock Text="Edit"/>
-                                </Button>
-                                <Button Click="Layers_Select_Click" ToolTip="Select layer" Margin="0,0,4,4">
-                                    <TextBlock Text="Select"/>
-                                </Button>
-                                <Button Click="Layers_Rename_Click" ToolTip="Rename layer" Margin="0,0,4,4">
-                                    <TextBlock Text="Rename"/>
-                                </Button>
-                                <Button Click="Layers_Delete_Click" ToolTip="Delete layer" Margin="0,0,4,4">
-                                    <TextBlock Text="Delete"/>
-                                </Button>
-                            </WrapPanel>
-
-                            <Separator Margin="0,10,0,8"/>
-
-                            <!-- GRID -->
-                            <TextBlock Text="GRID"
-                                       FontSize="10"
-                                       Margin="2,0,0,4"
-                                       Foreground="{StaticResource PmSubTextBrush}"
-                                       FontWeight="Bold"/>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Click="View_ToggleGrid_Click" ToolTip="Toggle grid" Margin="0,0,4,0">
-                                    <TextBlock Text="Toggle"/>
-                                </Button>
-                                <Button Click="View_GridSettings_Click" ToolTip="Grid settings">
-                                    <TextBlock Text="Settings"/>
-                                </Button>
-                            </StackPanel>
-
-                            <Separator Margin="0,10,0,8"/>
-
-                            <!-- CLIPBOARD -->
-                            <TextBlock Text="CLIPBOARD"
-                                       FontSize="10"
-                                       Margin="2,0,0,4"
-                                       Foreground="{StaticResource PmSubTextBrush}"
-                                       FontWeight="Bold"/>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Click="Clipboard_Copy_Click" ToolTip="Copy" Margin="0,0,4,0">
-                                    <TextBlock Text="Copy"/>
-                                </Button>
-                                <Button Click="Clipboard_Cut_Click" ToolTip="Cut" Margin="0,0,4,0">
-                                    <TextBlock Text="Cut"/>
-                                </Button>
-                                <Button Click="Clipboard_Paste_Click" ToolTip="Paste">
-                                    <TextBlock Text="Paste"/>
-                                </Button>
-                            </StackPanel>
-
-                            <Separator Margin="0,10,0,8"/>
-
-                            <!-- ZOOM -->
-                            <TextBlock Text="ZOOM"
-                                       FontSize="10"
-                                       Margin="2,0,0,4"
-                                       Foreground="{StaticResource PmSubTextBrush}"
-                                       FontWeight="Bold"/>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Click="Zoom_Out_Click" ToolTip="Zoom out" Margin="0,0,4,0">
-                                    <TextBlock Text="-"/>
-                                </Button>
-                                <Button Click="Zoom_100_Click" ToolTip="Zoom 100%" Margin="0,0,4,0">
-                                    <TextBlock Text="100%"/>
-                                </Button>
-                                <Button Click="Zoom_In_Click" ToolTip="Zoom in" Margin="0,0,4,0">
-                                    <TextBlock Text="+"/>
-                                </Button>
-                                <Button Click="Zoom_Fit_Click" ToolTip="Zoom to fit">
-                                    <TextBlock Text="Fit"/>
-                                </Button>
-                            </StackPanel>
-
+                        <!-- SELECTION -->
+                        <TextBlock Text="SELECTION"
+                                   FontSize="10"
+                                   Margin="2,0,0,4"
+                                   Foreground="{StaticResource PmSubTextBrush}"
+                                   FontWeight="Bold"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Click="Select_Rect_Click" ToolTip="Rectangular selection" Margin="0,0,4,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="▭"
+                                               FontSize="14"
+                                               Foreground="{StaticResource PmGlyphBrush}"
+                                               Margin="0,0,4,0"/>
+                                    <TextBlock Text="Rect"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Click="Select_Lasso_Click" ToolTip="Free-form (lasso)" Margin="0,0,4,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="◌"
+                                               FontSize="14"
+                                               Foreground="{StaticResource PmGlyphBrush}"
+                                               Margin="0,0,4,0"/>
+                                    <TextBlock Text="Lasso"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Click="Select_Polygon_Click" ToolTip="Polygon selection">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="△"
+                                               FontSize="14"
+                                               Foreground="{StaticResource PmGlyphBrush}"
+                                               Margin="0,0,4,0"/>
+                                    <TextBlock Text="Poly"/>
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
-                    </ScrollViewer>
-                </Border>
-            </Grid>
-        </ScrollViewer>
+
+                        <!-- Crop & Resize -->
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <Button Click="Image_Crop_Click" ToolTip="Crop to selection" Margin="0,0,4,0">
+                                <TextBlock Text="Crop"/>
+                            </Button>
+                            <Button Click="Image_Resize_Click" ToolTip="Resize image">
+                                <TextBlock Text="Resize"/>
+                            </Button>
+                        </StackPanel>
+
+                        <Separator Margin="0,10,0,8"/>
+
+                        <!-- TRANSFORM (rotate/flip) -->
+                        <TextBlock Text="TRANSFORM"
+                                   FontSize="10"
+                                   Margin="2,0,0,4"
+                                   Foreground="{StaticResource PmSubTextBrush}"
+                                   FontWeight="Bold"/>
+                        <WrapPanel>
+                            <Button Click="Rotate_Right_Click" ToolTip="Rotate right 90°" Margin="0,0,4,4">
+                                <TextBlock Text="⟳ 90°"/>
+                            </Button>
+                            <Button Click="Rotate_Left_Click" ToolTip="Rotate left 90°" Margin="0,0,4,4">
+                                <TextBlock Text="⟲ 90°"/>
+                            </Button>
+                            <Button Click="Flip_Vert_Click" ToolTip="Flip vertical" Margin="0,0,4,4">
+                                <TextBlock Text="Flip V"/>
+                            </Button>
+                            <Button Click="Flip_Horiz_Click" ToolTip="Flip horizontal" Margin="0,0,4,4">
+                                <TextBlock Text="Flip H"/>
+                            </Button>
+                        </WrapPanel>
+
+                        <Separator Margin="0,10,0,8"/>
+
+                        <!-- LAYERS -->
+                        <TextBlock Text="LAYERS"
+                                   FontSize="10"
+                                   Margin="2,0,0,4"
+                                   Foreground="{StaticResource PmSubTextBrush}"
+                                   FontWeight="Bold"/>
+                        <WrapPanel>
+                            <Button Click="Layers_New_Click" ToolTip="New layer" Margin="0,0,4,4">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="+"
+                                               FontSize="14"
+                                               Foreground="{StaticResource PmGlyphBrush}"
+                                               Margin="0,0,4,0"/>
+                                    <TextBlock Text="New"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Click="Layers_Load_Click" ToolTip="Load layer" Margin="0,0,4,4">
+                                <TextBlock Text="Load"/>
+                            </Button>
+                            <Button Click="Layers_Edit_Click" ToolTip="Edit layer" Margin="0,0,4,4">
+                                <TextBlock Text="Edit"/>
+                            </Button>
+                            <Button Click="Layers_Select_Click" ToolTip="Select layer" Margin="0,0,4,4">
+                                <TextBlock Text="Select"/>
+                            </Button>
+                            <Button Click="Layers_Rename_Click" ToolTip="Rename layer" Margin="0,0,4,4">
+                                <TextBlock Text="Rename"/>
+                            </Button>
+                            <Button Click="Layers_Delete_Click" ToolTip="Delete layer" Margin="0,0,4,4">
+                                <TextBlock Text="Delete"/>
+                            </Button>
+                        </WrapPanel>
+
+                        <Separator Margin="0,10,0,8"/>
+
+                        <!-- GRID -->
+                        <TextBlock Text="GRID"
+                                   FontSize="10"
+                                   Margin="2,0,0,4"
+                                   Foreground="{StaticResource PmSubTextBrush}"
+                                   FontWeight="Bold"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Click="View_ToggleGrid_Click" ToolTip="Toggle grid" Margin="0,0,4,0">
+                                <TextBlock Text="Toggle"/>
+                            </Button>
+                            <Button Click="View_GridSettings_Click" ToolTip="Grid settings">
+                                <TextBlock Text="Settings"/>
+                            </Button>
+                        </StackPanel>
+
+                        <Separator Margin="0,10,0,8"/>
+
+                        <!-- CLIPBOARD -->
+                        <TextBlock Text="CLIPBOARD"
+                                   FontSize="10"
+                                   Margin="2,0,0,4"
+                                   Foreground="{StaticResource PmSubTextBrush}"
+                                   FontWeight="Bold"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Click="Clipboard_Copy_Click" ToolTip="Copy" Margin="0,0,4,0">
+                                <TextBlock Text="Copy"/>
+                            </Button>
+                            <Button Click="Clipboard_Cut_Click" ToolTip="Cut" Margin="0,0,4,0">
+                                <TextBlock Text="Cut"/>
+                            </Button>
+                            <Button Click="Clipboard_Paste_Click" ToolTip="Paste">
+                                <TextBlock Text="Paste"/>
+                            </Button>
+                        </StackPanel>
+
+                        <Separator Margin="0,10,0,8"/>
+
+                        <!-- ZOOM -->
+                        <TextBlock Text="ZOOM"
+                                   FontSize="10"
+                                   Margin="2,0,0,4"
+                                   Foreground="{StaticResource PmSubTextBrush}"
+                                   FontWeight="Bold"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Click="Zoom_Out_Click" ToolTip="Zoom out" Margin="0,0,4,0">
+                                <TextBlock Text="-"/>
+                            </Button>
+                            <Button Click="Zoom_100_Click" ToolTip="Zoom 100%" Margin="0,0,4,0">
+                                <TextBlock Text="100%"/>
+                            </Button>
+                            <Button Click="Zoom_In_Click" ToolTip="Zoom in" Margin="0,0,4,0">
+                                <TextBlock Text="+"/>
+                            </Button>
+                            <Button Click="Zoom_Fit_Click" ToolTip="Zoom to fit">
+                                <TextBlock Text="Fit"/>
+                            </Button>
+                        </StackPanel>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
 
     </DockPanel>
 </Window>

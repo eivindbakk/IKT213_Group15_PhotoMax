@@ -35,11 +35,18 @@ namespace PhotoMax
         internal double _gridSpacing = 32.0;
 
         // Image features controller (defined in MenuHandlers/Image.cs)
-        private ImageController? _img;
+        public ImageController? _img;
 
         // Current file
         private string? _currentFilePath = null;
         private bool _hasUnsavedChanges = false;
+        
+        public ImageController? ImageController => _img;
+        public bool HasUnsavedChanges
+        {
+            get => _hasUnsavedChanges;
+            set => _hasUnsavedChanges = value;
+        }
 
         public MainWindow()
         {
