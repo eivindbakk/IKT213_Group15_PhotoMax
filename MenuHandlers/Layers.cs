@@ -10,6 +10,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;  // **ADD THIS**
 using Microsoft.Win32;
 using OpenCvSharp;
 
@@ -202,13 +204,18 @@ namespace PhotoMax
         }
 
         // ----- composite (normal blend in stack order) -----
+        // ----- composite (normal blend in stack order) -----
         public Mat Composite()
         {
             if (Layers.Count == 0) return new Mat();
             var dst = new Mat(Height, Width, MatType.CV_8UC4);
-            dst.SetTo(new Scalar(0, 0, 0, 0));
+    
+            // **FIX: Start with white background instead of black**
+            dst.SetTo(new Scalar(255, 255, 255, 255)); // White opaque background
+    
             foreach (var l in Layers)
                 if (l.Visible) AlphaBlendOver(dst, l.Mat);
+    
             MakeOpaque(dst); // keep final view opaque (matches previous behaviour)
             return dst;
         }
@@ -341,12 +348,15 @@ namespace PhotoMax
             var names = _img.Layers_AllNames;
             if (names.Count == 0) return;
 
-            string prompt = "Select active layer index:\n" + string.Join("\n", names.Select((n, i) => $"[{i}] {n}")) + "\n";
-            var s = Microsoft.VisualBasic.Interaction.InputBox(prompt, "Select Layer", "0");
-            if (int.TryParse(s, out int idx))
+            var dlg = new LayerSelectWindow(_img.Layers_GetActiveIndex(), names)
             {
-                _img.Layers_Select(idx);
-                StatusText.Content = $"Active layer: [{idx}] '{_img.Layers_ActiveName}'";
+                Owner = this
+            };
+
+            if (dlg.ShowDialog() == true)
+            {
+                _img.Layers_Select(dlg.SelectedIndex);
+                StatusText.Content = $"Active layer: [{dlg.SelectedIndex}] '{_img.Layers_ActiveName}'";
             }
         }
 
@@ -360,12 +370,266 @@ namespace PhotoMax
         private void Layers_Rename_Click(object sender, RoutedEventArgs e)
         {
             if (_img == null) return;
-            var s = Microsoft.VisualBasic.Interaction.InputBox("New layer name:", "Rename Layer", _img.Layers_ActiveName);
-            if (!string.IsNullOrWhiteSpace(s))
+    
+            var dlg = new LayerRenameWindow(_img.Layers_ActiveName)
             {
-                _img.Layers_RenameActive(s.Trim());
+                Owner = this
+            };
+
+            if (dlg.ShowDialog() == true)
+            {
+                _img.Layers_RenameActive(dlg.NewName);
                 StatusText.Content = $"Renamed to '{_img.Layers_ActiveName}'";
             }
         }
     }
+    // ========== LAYER SELECT WINDOW ==========
+internal sealed class LayerSelectWindow : WWindow
+{
+    public int SelectedIndex { get; private set; }
+    
+    private readonly ListBox _layerList;
+
+    public LayerSelectWindow(int currentIndex, List<string> layerNames)
+    {
+        SelectedIndex = currentIndex;
+
+        Title = "Select Layer";
+        Width = 400;
+        Height = 450;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        ResizeMode = ResizeMode.NoResize;
+        
+        Background = new SolidColorBrush(Color.FromArgb(255, 30, 30, 30));
+        Foreground = new SolidColorBrush(Color.FromArgb(255, 243, 243, 243));
+
+        var mainGrid = new Grid { Margin = new Thickness(20) };
+        mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        // Header
+        var header = new TextBlock
+        {
+            Text = "LAYERS",
+            FontSize = 11,
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(Color.FromArgb(255, 176, 176, 176)),
+            Margin = new Thickness(0, 0, 0, 12)
+        };
+        Grid.SetRow(header, 0);
+
+        // Layer list
+        _layerList = new ListBox
+        {
+            Background = new SolidColorBrush(Color.FromArgb(255, 45, 45, 45)),
+            Foreground = Foreground,
+            BorderBrush = new SolidColorBrush(Color.FromArgb(255, 63, 63, 70)),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(4),
+            FontSize = 13,
+            SelectionMode = SelectionMode.Single
+        };
+
+        // Populate with layer items
+        for (int i = layerNames.Count - 1; i >= 0; i--) // Top to bottom (reverse order)
+        {
+            var layer = layerNames[i];
+            var item = new LayerListItem(i, layer, i == currentIndex);
+            _layerList.Items.Add(item);
+            
+            if (i == currentIndex)
+            {
+                _layerList.SelectedItem = item;
+            }
+        }
+
+        _layerList.SelectionChanged += (s, e) =>
+        {
+            if (_layerList.SelectedItem is LayerListItem item)
+            {
+                SelectedIndex = item.Index;
+            }
+        };
+
+        // Double-click to confirm
+        _layerList.MouseDoubleClick += (s, e) =>
+        {
+            if (_layerList.SelectedItem != null)
+            {
+                DialogResult = true;
+                Close();
+            }
+        };
+
+        Grid.SetRow(_layerList, 1);
+
+        // Info text
+        var infoText = new TextBlock
+        {
+            Text = "Double-click to select, or click OK",
+            FontSize = 10,
+            Foreground = new SolidColorBrush(Color.FromArgb(255, 150, 150, 150)),
+            Margin = new Thickness(0, 12, 0, 12),
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
+        Grid.SetRow(infoText, 1);
+        infoText.VerticalAlignment = VerticalAlignment.Bottom;
+
+        // Buttons
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 20, 0, 0)
+        };
+
+        var okBtn = new Button
+        {
+            Content = "OK",
+            Width = 80,
+            Padding = new Thickness(12, 6, 12, 6),
+            Margin = new Thickness(0, 0, 8, 0),
+            IsDefault = true
+        };
+        okBtn.Click += (s, e) => { DialogResult = true; Close(); };
+
+        var cancelBtn = new Button
+        {
+            Content = "Cancel",
+            Width = 80,
+            Padding = new Thickness(12, 6, 12, 6),
+            IsCancel = true
+        };
+
+        buttonPanel.Children.Add(okBtn);
+        buttonPanel.Children.Add(cancelBtn);
+        Grid.SetRow(buttonPanel, 2);
+
+        mainGrid.Children.Add(header);
+        mainGrid.Children.Add(_layerList);
+        mainGrid.Children.Add(infoText);
+        mainGrid.Children.Add(buttonPanel);
+
+        Content = mainGrid;
+        
+        // Focus the list for keyboard navigation
+        Loaded += (s, e) => _layerList.Focus();
+    }
+
+    // Custom item for rich display
+    private class LayerListItem
+    {
+        public int Index { get; }
+        public string Name { get; }
+        public bool IsActive { get; }
+
+        public LayerListItem(int index, string name, bool isActive)
+        {
+            Index = index;
+            Name = name;
+            IsActive = isActive;
+        }
+
+        public override string ToString()
+        {
+            var active = IsActive ? " ★" : "";
+            return $"[{Index}] {Name}{active}";
+        }
+    }
+}
+// ========== LAYER RENAME WINDOW ==========
+internal sealed class LayerRenameWindow : WWindow
+{
+    public string NewName { get; private set; }
+
+    public LayerRenameWindow(string currentName)
+    {
+        NewName = currentName;
+
+        Title = "Rename Layer";
+        Width = 320;
+        Height = 150;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        ResizeMode = ResizeMode.NoResize;
+
+        // **DARK THEME - matching Edit dialog**
+        Background = new SolidColorBrush(Color.FromArgb(255, 30, 30, 30));
+
+        var root = new Grid { Margin = new Thickness(12) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        var namePanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+        
+        var label = new TextBlock 
+        { 
+            Text = "Name:", 
+            VerticalAlignment = VerticalAlignment.Center, 
+            Width = 70,
+            Foreground = Brushes.White  // **WHITE TEXT**
+        };
+        namePanel.Children.Add(label);
+        
+        var nameBox = new TextBox 
+        { 
+            Text = currentName, 
+            MinWidth = 180,
+            Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),  // **DARK INPUT**
+            Foreground = Brushes.White,  // **WHITE TEXT**
+            BorderBrush = new SolidColorBrush(Color.FromArgb(255, 70, 70, 70)),
+            CaretBrush = Brushes.White
+        };
+        namePanel.Children.Add(nameBox);
+
+        var btnPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        
+        var ok = new Button 
+        { 
+            Content = "OK", 
+            Width = 70, 
+            Margin = new Thickness(0, 0, 8, 0), 
+            IsDefault = true,
+            Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),  // **DARK BUTTON**
+            Foreground = Brushes.White
+        };
+        
+        var cancel = new Button 
+        { 
+            Content = "Cancel", 
+            Width = 70, 
+            IsCancel = true,
+            Background = new SolidColorBrush(Color.FromArgb(255, 50, 50, 50)),  // **DARK BUTTON**
+            Foreground = Brushes.White
+        };
+        
+        btnPanel.Children.Add(ok);
+        btnPanel.Children.Add(cancel);
+
+        Grid.SetRow(namePanel, 0);
+        Grid.SetRow(btnPanel, 1);
+        root.Children.Add(namePanel);
+        root.Children.Add(btnPanel);
+
+        Content = root;
+
+        ok.Click += (_, __) =>
+        {
+            var trimmed = nameBox.Text?.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmed))
+            {
+                NewName = trimmed;
+                DialogResult = true;
+                Close();
+            }
+        };
+
+        // Focus and select all for easy editing
+        Loaded += (s, e) =>
+        {
+            nameBox.Focus();
+            nameBox.SelectAll();
+        };
+    }
+}
 }

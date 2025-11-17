@@ -1,52 +1,141 @@
 ﻿<Window x:Class="PhotoMax.GridSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Grid Settings" Height="260" Width="380"
-        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
-    <Grid Margin="16">
+        Title="Grid Settings" 
+        Height="540" 
+        Width="420"
+        WindowStartupLocation="CenterOwner" 
+        ResizeMode="NoResize"
+        Background="{StaticResource PmWindowBackgroundBrush}"
+        Foreground="{StaticResource PmTextBrush}">
+    <Grid Margin="20">
 
-        <!-- ROWS: Preview, spacer, controls, spacer, buttons -->
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="12"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Preview -->
-        <Border Grid.Row="0" CornerRadius="4" BorderBrush="#DDD" BorderThickness="1" Padding="0">
+        <!-- Header -->
+        <TextBlock Grid.Row="0"
+                   Text="GRID SETTINGS"
+                   FontSize="11"
+                   FontWeight="Bold"
+                   Foreground="{StaticResource PmSubTextBrush}"
+                   Margin="0,0,0,12"/>
+
+        <!-- Preview Section -->
+        <TextBlock Grid.Row="1"
+                   Text="PREVIEW"
+                   FontSize="10"
+                   FontWeight="Bold"
+                   Foreground="{StaticResource PmSubTextBrush}"
+                   Margin="0,0,0,8"/>
+
+        <Border Grid.Row="3" 
+                CornerRadius="6" 
+                BorderBrush="{StaticResource PmPanelBorderBrush}" 
+                BorderThickness="2" 
+                Background="#2D2D2D"
+                Height="120"
+                Padding="0">
             <Grid>
-                <Rectangle Fill="White"/>
+                <Rectangle Fill="#202020"/>
                 <Rectangle x:Name="PreviewGrid"/>
+                <!-- Preview label -->
+                <TextBlock Text="Grid preview"
+                           FontSize="10"
+                           Foreground="{StaticResource PmSubTextBrush}"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Bottom"
+                           Margin="0,0,0,8"/>
             </Grid>
         </Border>
 
-        <!-- Controls row -->
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="8"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
+        <!-- Controls Section -->
+        <TextBlock Grid.Row="5"
+                   Text="APPEARANCE"
+                   FontSize="10"
+                   FontWeight="Bold"
+                   Foreground="{StaticResource PmSubTextBrush}"
+                   Margin="0,0,0,8"/>
 
-            <Button Grid.Column="0" Content="Change Color..." Width="130" Padding="8,4"
-                    Click="ChangeColor_Click"/>
+        <StackPanel Grid.Row="7">
+            <!-- Color Button -->
+            <Button Content="🎨 Choose Grid Color..."
+                    Padding="12,8"
+                    HorizontalAlignment="Stretch"
+                    Margin="0,0,0,12"
+                    Click="ChangeColor_Click"
+                    ToolTip="Pick a color for the grid lines"/>
 
-            <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="Opacity:"/>
+            <!-- Opacity Control -->
+            <TextBlock Text="Opacity"
+                       FontSize="11"
+                       Foreground="{StaticResource PmTextBrush}"
+                       Margin="0,0,0,6"/>
 
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
-                <Slider x:Name="OpacitySlider" Width="160" Minimum="0" Maximum="100" TickFrequency="10"
-                        IsSnapToTickEnabled="False" ValueChanged="OpacitySlider_ValueChanged"/>
-                <TextBlock x:Name="OpacityLabel" VerticalAlignment="Center" Margin="8,0,0,0"/>
-            </StackPanel>
-        </Grid>
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="60"/>
+                </Grid.ColumnDefinitions>
+
+                <Slider x:Name="OpacitySlider" 
+                        Grid.Column="0"
+                        Minimum="0" 
+                        Maximum="100" 
+                        TickFrequency="5"
+                        IsSnapToTickEnabled="False" 
+                        ValueChanged="OpacitySlider_ValueChanged"
+                        VerticalAlignment="Center"
+                        Margin="0,0,8,0"/>
+
+                <TextBox x:Name="OpacityTextBox"
+                         Grid.Column="1"
+                         Width="60"
+                         Padding="6,4"
+                         VerticalContentAlignment="Center"
+                         TextAlignment="Center"
+                         Background="{StaticResource PmPanelBackgroundBrush}"
+                         Foreground="{StaticResource PmTextBrush}"
+                         BorderBrush="{StaticResource PmPanelBorderBrush}"
+                         PreviewTextInput="OpacityTextBox_PreviewTextInput"
+                         TextChanged="OpacityTextBox_TextChanged"/>
+            </Grid>
+
+            <TextBlock x:Name="OpacityLabel"
+                       FontSize="10"
+                       Foreground="{StaticResource PmSubTextBrush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,0"/>
+        </StackPanel>
 
         <!-- Buttons -->
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="OK" Width="80" Margin="0,0,8,0" IsDefault="True" Click="Ok_Click"/>
-            <Button Content="Cancel" Width="80" IsCancel="True"/>
+        <StackPanel Grid.Row="8" 
+                    Orientation="Horizontal" 
+                    HorizontalAlignment="Right"
+                    Margin="0,20,0,0">
+            <Button Content="✓ OK" 
+                    Width="100" 
+                    Padding="12,8"
+                    Margin="0,0,8,0" 
+                    IsDefault="True" 
+                    Click="Ok_Click"
+                    Background="#2D5A2D"
+                    BorderThickness="0"/>
+            <Button Content="✕ Cancel" 
+                    Width="100" 
+                    Padding="12,8"
+                    IsCancel="True"
+                    Background="#5A2D2D"
+                    BorderThickness="0"/>
         </StackPanel>
     </Grid>
 </Window>

@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using WF = System.Windows.Forms;
@@ -10,15 +12,21 @@ namespace PhotoMax
     {
         public Color GridColor { get; private set; }
         private double _gridSpacing = 32.0;
+        private bool _updatingFromSlider = false;
+        private bool _updatingFromTextBox = false;
 
         public GridSettingsWindow(Color initialColor)
         {
             InitializeComponent();
             GridColor = initialColor;
 
-            // Init slider from alpha
-            OpacitySlider.Value = Math.Round(GridColor.A * 100.0 / 255.0);
-            OpacityLabel.Text = $"{(int)OpacitySlider.Value}%";
+            // Init slider and textbox from alpha
+            double opacityPercent = Math.Round(GridColor.A * 100.0 / 255.0);
+            OpacitySlider.Value = opacityPercent;
+            OpacityTextBox.Text = $"{(int)opacityPercent}%";
+            OpacityLabel.Text = GridColor.A == 0 ? "Transparent (hidden)" : 
+                               GridColor.A == 255 ? "Fully opaque" : 
+                               $"{(int)opacityPercent}% opacity";
 
             UpdatePreview();
         }
@@ -57,7 +65,13 @@ namespace PhotoMax
 
         private void ChangeColor_Click(object sender, RoutedEventArgs e)
         {
-            using var dlg = new WF.ColorDialog { AllowFullOpen = true, FullOpen = true, Color = System.Drawing.Color.FromArgb(GridColor.R, GridColor.G, GridColor.B) };
+            using var dlg = new WF.ColorDialog 
+            { 
+                AllowFullOpen = true, 
+                FullOpen = true, 
+                Color = System.Drawing.Color.FromArgb(GridColor.R, GridColor.G, GridColor.B) 
+            };
+            
             if (dlg.ShowDialog() == WF.DialogResult.OK)
             {
                 // Keep the current alpha, update RGB
@@ -68,10 +82,50 @@ namespace PhotoMax
 
         private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
+            if (_updatingFromTextBox) return;
+            _updatingFromSlider = true;
+
             byte a = (byte)Math.Max(0, Math.Min(255, Math.Round(255.0 * e.NewValue / 100.0)));
             GridColor = Color.FromArgb(a, GridColor.R, GridColor.G, GridColor.B);
-            OpacityLabel.Text = $"{(int)e.NewValue}%";
+            
+            int percent = (int)e.NewValue;
+            OpacityTextBox.Text = $"{percent}%";
+            OpacityLabel.Text = a == 0 ? "Transparent (hidden)" : 
+                               a == 255 ? "Fully opaque" : 
+                               $"{percent}% opacity";
+            
             UpdatePreview();
+            _updatingFromSlider = false;
+        }
+
+        private void OpacityTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
+        {
+            // Only allow digits and % symbol
+            e.Handled = !Regex.IsMatch(e.Text, @"^[0-9%]+$");
+        }
+
+        private void OpacityTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+            if (_updatingFromSlider) return;
+            _updatingFromTextBox = true;
+
+            string text = OpacityTextBox.Text.Replace("%", "").Trim();
+            
+            if (int.TryParse(text, out int value))
+            {
+                value = Math.Clamp(value, 0, 100);
+                OpacitySlider.Value = value;
+                
+                // Update display
+                byte a = (byte)Math.Round(255.0 * value / 100.0);
+                GridColor = Color.FromArgb(a, GridColor.R, GridColor.G, GridColor.B);
+                OpacityLabel.Text = a == 0 ? "Transparent (hidden)" : 
+                                   a == 255 ? "Fully opaque" : 
+                                   $"{value}% opacity";
+                UpdatePreview();
+            }
+
+            _updatingFromTextBox = false;
         }
 
         private void Ok_Click(object sender, RoutedEventArgs e)
